@@ -28,6 +28,8 @@ jobs:
         run: cargo build --release
       - name: tests (unit, encoder behaviour, CLI, bit-exact conformance on synthetic frames)
         run: cargo test --release
+      - name: the same tests with debug assertions on
+        run: cargo test
       - name: end to end on a generated clip (encode, decode with ffmpeg, compare, report)
         run: |
           mkdir -p out

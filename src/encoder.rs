@@ -152,7 +152,18 @@ impl Encoder {
             RcMode::Abr { bps } => Some((bps / 1000.0).ceil() as u32),
             _ => None,
         };
-        let level = pick_level(mb_w as u32, mb_h as u32, fps, kbps);
+        if cfg.fps_num > 1 << 30 {
+            return Err("frame rate numerator is too large".into());
+        }
+        let level = pick_level(mb_w as u32, mb_h as u32, fps, kbps).ok_or_else(|| {
+            format!(
+                "{}x{} at {:.2} fps{} exceeds the limits of H.264 level 5.1",
+                cfg.width,
+                cfg.height,
+                fps,
+                kbps.map(|k| format!(" and {k} kbit/s")).unwrap_or_default()
+            )
+        })?;
         let max_vmv_q = level.max_vmv * 4;
         let init_qp = match cfg.rc {
             RcMode::ConstQp { qp, .. } => qp,
@@ -214,6 +225,10 @@ impl Encoder {
     /// Encodes one picture. `src` must be macroblock aligned with its
     /// padding already replicated (see `Frame::pad_from_visible`).
     pub fn encode(&mut self, src: &Frame) -> EncodedFrame {
+        assert!(
+            src.planes[0].w == self.mb_w * 16 && src.planes[0].h == self.mb_h * 16 && src.planes[0].pad == 0,
+            "input frame must come from Encoder::new_input_frame()"
+        );
         let idr = self.since_idr == 0 || self.since_idr >= self.cfg.keyint;
         if idr {
             self.frame_num = 0;

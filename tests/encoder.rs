@@ -162,6 +162,11 @@ fn rejects_bad_configurations() {
     let mut c = Config::new(16, 16, 30, 1);
     c.keyint = 0;
     assert!(Encoder::new(c).is_err());
+    // Beyond level 5.1: 8K, or a bitrate no level allows.
+    assert!(Encoder::new(Config::new(7680, 4320, 30, 1)).is_err());
+    let mut c = Config::new(352, 288, 30, 1);
+    c.rc = RcMode::Abr { bps: 500e6 };
+    assert!(Encoder::new(c).is_err());
     assert!(Encoder::new(Config::new(16, 16, 30, 1)).is_ok());
 }
 

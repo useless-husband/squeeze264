@@ -572,22 +572,19 @@ pub const LEVELS: [Level; 15] = [
 ];
 
 /// Lowest level whose frame size, macroblock rate, picture dimensions and
-/// (when known) bitrate limits admit the stream.
-pub fn pick_level(mb_w: u32, mb_h: u32, fps: f64, kbps: Option<u32>) -> Level {
+/// (when known) bitrate limits admit the stream; None if even level 5.1
+/// is too small.
+pub fn pick_level(mb_w: u32, mb_h: u32, fps: f64, kbps: Option<u32>) -> Option<Level> {
     let fs = mb_w * mb_h;
     let mbps = (fs as f64 * fps).ceil() as u32;
-    for l in LEVELS {
+    LEVELS.into_iter().find(|l| {
         let dim_limit = ((l.max_fs * 8) as f64).sqrt() as u32;
-        if fs <= l.max_fs
+        fs <= l.max_fs
             && mbps <= l.max_mbps
             && mb_w <= dim_limit
             && mb_h <= dim_limit
             && kbps.is_none_or(|k| k <= l.max_br)
-        {
-            return l;
-        }
-    }
-    LEVELS[LEVELS.len() - 1]
+    })
 }
 
 #[cfg(test)]
@@ -736,11 +733,14 @@ mod tests {
 
     #[test]
     fn level_selection() {
-        assert_eq!(pick_level(22, 18, 30.0, None).idc, 13); // CIF 30 fps
-        assert_eq!(pick_level(11, 9, 15.0, None).idc, 10); // QCIF 15 fps
-        assert_eq!(pick_level(80, 45, 30.0, None).idc, 31); // 720p30
-        assert_eq!(pick_level(80, 45, 50.0, None).idc, 32); // 720p50
-        assert_eq!(pick_level(120, 68, 30.0, None).idc, 40); // 1080p30
-        assert_eq!(pick_level(22, 18, 30.0, Some(1500)).idc, 20);
+        let idc = |w, h, fps, kbps| pick_level(w, h, fps, kbps).map(|l| l.idc);
+        assert_eq!(idc(22, 18, 30.0, None), Some(13)); // CIF 30 fps
+        assert_eq!(idc(11, 9, 15.0, None), Some(10)); // QCIF 15 fps
+        assert_eq!(idc(80, 45, 30.0, None), Some(31)); // 720p30
+        assert_eq!(idc(80, 45, 50.0, None), Some(32)); // 720p50
+        assert_eq!(idc(120, 68, 30.0, None), Some(40)); // 1080p30
+        assert_eq!(idc(22, 18, 30.0, Some(1500)), Some(20));
+        assert_eq!(idc(480, 270, 30.0, None), None); // 8K is beyond level 5.1
+        assert_eq!(idc(22, 18, 30.0, Some(999_999)), None);
     }
 }

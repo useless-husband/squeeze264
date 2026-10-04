@@ -15,6 +15,8 @@ struct Clip {
     stream: Vec<u8>,
     recon: Vec<u8>,
     frames: usize,
+    /// (is P slice, record) for every macroblock coded.
+    records: Vec<(bool, squeeze264::mb::MbRecord)>,
 }
 
 fn encode(cfg: Config, frames: usize, pattern: Pattern, seed: u64) -> (Clip, Encoder) {
@@ -22,6 +24,7 @@ fn encode(cfg: Config, frames: usize, pattern: Pattern, seed: u64) -> (Clip, Enc
     let mut enc = Encoder::new(cfg).expect("config");
     let mut stream = Vec::new();
     let mut recon = Vec::new();
+    let mut records = Vec::new();
     let (sps, pps) = enc.headers();
     for i in 0..frames {
         let src = synth_frame(w, h, i, frames, pattern, seed);
@@ -32,8 +35,15 @@ fn encode(cfg: Config, frames: usize, pattern: Pattern, seed: u64) -> (Clip, Enc
         }
         out.nal.write_annexb(&mut stream);
         enc.recon().write_i420(w, h, &mut recon);
+        records.extend(out.records.into_iter().map(|r| (!out.stats.idr, r)));
     }
-    (Clip { stream, recon, frames }, enc)
+    let clip = Clip {
+        stream,
+        recon,
+        frames,
+        records,
+    };
+    (clip, enc)
 }
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -140,6 +150,24 @@ fn p_frames_default_settings() {
 #[test]
 fn fuzz_random_decisions() {
     let mut coverage = squeeze264::cavlc::Coverage::default();
+    let mut seen = SyntaxSeen {
+        i4_modes: [false; 9],
+        i16_modes: [false; 4],
+        chroma_modes: [false; 4],
+        parts: [false; 4],
+        subs: [false; 4],
+        cbp_intra: [false; 48],
+        cbp_inter: [false; 48],
+        i16_cbp: [false; 6],
+        skip: false,
+        pcm_in_i: false,
+        pcm_in_p: false,
+        intra_in_p: false,
+        qp_up: false,
+        qp_down: false,
+        qp_extremes: [false; 2],
+        fractional_mv: [[false; 4]; 4],
+    };
     let sizes = [(64, 48), (16, 16), (32, 16), (16, 48), (80, 64), (128, 96), (176, 144)];
     for seed in 0..28u64 {
         let (w, h) = sizes[seed as usize % sizes.len()];
@@ -155,10 +183,121 @@ fn fuzz_random_decisions() {
         let (clip, enc) = encode(cfg, 10, pattern, 1000 + seed);
         assert_bit_exact(&format!("fuzz-seed{seed}"), &clip, w, h, Decoder::FfmpegSoftware);
         coverage.merge(&enc.coverage);
+        seen.add(&clip);
     }
     let (used, total) = coverage.summary();
     eprintln!("fuzz corpus exercised {used}/{total} coeff_token table entries");
     assert_eq!(used, total, "fuzz corpus should reach every coeff_token entry");
+    seen.assert_complete();
+}
+
+/// Which syntax alternatives the fuzz corpus actually produced.
+struct SyntaxSeen {
+    i4_modes: [bool; 9],
+    i16_modes: [bool; 4],
+    chroma_modes: [bool; 4],
+    parts: [bool; 4],
+    subs: [bool; 4],
+    cbp_intra: [bool; 48],
+    cbp_inter: [bool; 48],
+    /// I16x16 mb_type also encodes luma/chroma CBP: 2 x 3 combinations.
+    i16_cbp: [bool; 6],
+    skip: bool,
+    pcm_in_i: bool,
+    pcm_in_p: bool,
+    intra_in_p: bool,
+    qp_up: bool,
+    qp_down: bool,
+    qp_extremes: [bool; 2],
+    fractional_mv: [[bool; 4]; 4],
+}
+
+impl SyntaxSeen {
+    fn add(&mut self, clip: &Clip) {
+        use squeeze264::mb::MbMode;
+        let mut prev_qp: Option<u8> = None;
+        for (is_p, r) in &clip.records {
+            match &r.mode {
+                MbMode::I4 { modes } => {
+                    modes.iter().for_each(|&m| self.i4_modes[m as usize] = true);
+                    self.cbp_intra[r.cbp as usize] = true;
+                    self.chroma_modes[r.chroma_mode as usize] = true;
+                    self.intra_in_p |= is_p;
+                }
+                MbMode::I16 { mode } => {
+                    self.i16_modes[*mode as usize] = true;
+                    self.i16_cbp[(r.cbp >> 4) as usize + if r.cbp & 15 != 0 { 3 } else { 0 }] = true;
+                    self.chroma_modes[r.chroma_mode as usize] = true;
+                    self.intra_in_p |= is_p;
+                }
+                MbMode::Inter { part, sub, mvs } => {
+                    self.parts[*part as usize] = true;
+                    if *part == 3 {
+                        sub.iter().for_each(|&s| self.subs[s as usize] = true);
+                    }
+                    self.cbp_inter[r.cbp as usize] = true;
+                    for mv in mvs {
+                        self.fractional_mv[(mv[1] & 3) as usize][(mv[0] & 3) as usize] = true;
+                    }
+                }
+                MbMode::Skip { .. } => self.skip = true,
+                MbMode::Pcm => {
+                    if *is_p {
+                        self.pcm_in_p = true;
+                    } else {
+                        self.pcm_in_i = true;
+                    }
+                    continue; // QP 0 is only what the deblocking filter sees
+                }
+            }
+            if let Some(p) = prev_qp {
+                self.qp_up |= r.qp > p;
+                self.qp_down |= r.qp < p;
+            }
+            self.qp_extremes[0] |= r.qp == 0;
+            self.qp_extremes[1] |= r.qp == 51;
+            prev_qp = Some(r.qp);
+        }
+    }
+
+    fn assert_complete(&self) {
+        assert!(self.i4_modes.iter().all(|&b| b), "Intra4x4 modes {:?}", self.i4_modes);
+        assert!(
+            self.i16_modes.iter().all(|&b| b),
+            "Intra16x16 modes {:?}",
+            self.i16_modes
+        );
+        assert!(
+            self.chroma_modes.iter().all(|&b| b),
+            "chroma modes {:?}",
+            self.chroma_modes
+        );
+        assert!(self.parts.iter().all(|&b| b), "partitions {:?}", self.parts);
+        assert!(self.subs.iter().all(|&b| b), "sub-partitions {:?}", self.subs);
+        assert!(
+            self.i16_cbp.iter().all(|&b| b),
+            "I16x16 CBP combinations {:?}",
+            self.i16_cbp
+        );
+        let missing = |seen: &[bool; 48]| (0..48).filter(|&i| !seen[i]).collect::<Vec<_>>();
+        assert!(
+            missing(&self.cbp_intra).is_empty(),
+            "intra CBP values never coded: {:?}",
+            missing(&self.cbp_intra)
+        );
+        assert!(
+            missing(&self.cbp_inter).is_empty(),
+            "inter CBP values never coded: {:?}",
+            missing(&self.cbp_inter)
+        );
+        assert!(self.skip && self.pcm_in_i && self.pcm_in_p && self.intra_in_p);
+        assert!(self.qp_up && self.qp_down && self.qp_extremes == [true, true]);
+        assert!(
+            self.fractional_mv.iter().flatten().all(|&b| b),
+            "sub-sample positions {:?}",
+            self.fractional_mv
+        );
+    }
 }
 
 /// Picture sizes that are not multiples of 16 are padded internally and
@@ -394,6 +533,7 @@ fn real_clips() {
                 stream,
                 recon,
                 frames: n,
+                records: Vec::new(),
             };
             let tag = format!("{}-qp{qp}", name.trim_end_matches(".y4m"));
             assert_bit_exact(&tag, &clip, hdr.width, hdr.height, Decoder::FfmpegSoftware);
@@ -453,6 +593,7 @@ fn oversized_macroblocks_fall_back_to_pcm() {
         stream,
         recon,
         frames: 6,
+        records: Vec::new(),
     };
     assert_bit_exact("pcm-fallback", &clip, 176, 144, Decoder::FfmpegSoftware);
     // (QCIF because the VideoToolbox decoder refuses to open very small pictures.)

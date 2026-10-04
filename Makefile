@@ -6,7 +6,7 @@ JOBS ?= 4
 BIN := target/release/squeeze264
 CLIPS := foreman_cif akiyo_cif mobile_cif shields_720p_100f
 
-.PHONY: build test lint data check bench report avcheck demo clean
+.PHONY: build test test-debug lint data check bench report avcheck demo clean
 
 build:
 	$(CARGO) build --release -j $(JOBS)
@@ -16,6 +16,11 @@ build:
 # with a message without it; tests on real clips skip until `make data`.
 test:
 	$(CARGO) test --release -j $(JOBS)
+
+# The same tests with debug assertions (index bounds of every sample fetch,
+# coefficient ranges, QP delta range) switched on.
+test-debug:
+	$(CARGO) test -j $(JOBS)
 
 lint:
 	$(CARGO) fmt --check
