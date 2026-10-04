@@ -3,12 +3,15 @@
 
 pub mod bitstream;
 pub mod cavlc;
+pub mod deblock;
 pub mod frame;
+pub mod headers;
 pub mod inter;
 pub mod intra;
 pub mod md5;
 pub mod mvpred;
 pub mod rng;
+pub mod state;
 pub mod tables;
 pub mod transform;
 pub mod y4m;
