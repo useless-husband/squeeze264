@@ -284,7 +284,8 @@ pub(crate) mod tests {
             .collect()
     }
 
-    // The widely reproduced worked example (block 0,3,-1,0 / 0,-1,1,0 /
+    // Example 1 of Iain Richardson's Vcodex white paper "H.264 / AVC Context
+    // Adaptive Variable Length Coding" (block 0,3,-1,0 / 0,-1,1,0 /
     // 1,0,0,0 / 0,0,0,0 scanned in zig-zag order with nC = 0).
     #[test]
     fn textbook_example_one() {
@@ -292,7 +293,7 @@ pub(crate) mod tests {
         assert_eq!(bit_string(&scan, 0), "000010001110010111101101");
     }
 
-    // Second classic example: -2,4,3,-3,0,0,-1 followed by zeros, nC = 0:
+    // Example 2 of the same white paper: -2,4,3,-3,0,0,-1 followed by zeros, nC = 0:
     // coeff_token(5,1) 0000000110, sign 1, levels 0001 | 1 0 (suffix) ...
     #[test]
     fn textbook_example_two() {

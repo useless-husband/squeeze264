@@ -123,7 +123,7 @@ prediction mode and partition shape, all 16 sub-sample positions, and both QP ex
 **3. Unit tests against the specification** — `cargo test --release --lib` (86 tests)
 
 Exp-Golomb codes against Table 9-2; CAVLC tables for prefix-freeness and exact Kraft sums, round trips through a
-separate test-only decoder (60,000 random blocks) and two worked examples from the literature; the inverse
+separate test-only decoder (60,000 random blocks) and the two worked examples in Iain Richardson's Vcodex white paper on CAVLC; the inverse
 transform against the equations of clause 8.5.12; quantisation round-trip error bounds at all 52 QPs; all 16
 quarter-sample positions against a second, sample-by-sample implementation of clause 8.4.2.2; intra predictors
 on hand-computed examples; deblocking filter outputs and boundary strengths on hand-computed edges; motion

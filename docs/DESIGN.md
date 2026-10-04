@@ -91,7 +91,8 @@ the same layout it prints them (bit strings), and three independent nets catch t
    (for example 1 − 2/65536 for the first coeff_token table). A typo that changes a length or creates a duplicate
    fails here.
 2. **Round trip.** A separate test-only decoder, written from the *parsing* description (clause 9.2), decodes
-   60,000 random blocks, plus two worked examples from the literature whose expected bit strings are in the tests.
+   60,000 random blocks, plus the two worked examples from Iain Richardson's Vcodex white paper "H.264 / AVC Context Adaptive
+   Variable Length Coding", whose expected bit strings are in the tests.
 3. **The oracle.** The fuzz corpus must write every one of the 262 coeff_token entries (the encoder counts them)
    and the resulting streams must decode bit-exactly in ffmpeg and VideoToolbox. A swap of two equal-length code
    words passes nets 1 and 2 but not this one. `tools/mutants.py` plants exactly such swaps to prove it.
