@@ -790,9 +790,11 @@ impl MbCoder<'_> {
         }
         let mark = self.bw.mark();
         let saved = (self.skip_run, self.prev_qp, self.records.len());
+        let saved_cov = self.cov.clone();
         let layer_bits = self.write_mb_coded(coded);
         if layer_bits > MAX_MB_BITS {
             self.bw.rewind(mark);
+            *self.cov = saved_cov;
             self.skip_run = saved.0;
             self.prev_qp = saved.1;
             self.records.truncate(saved.2);
