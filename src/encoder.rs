@@ -84,6 +84,8 @@ pub struct FrameStats {
     pub n_i16: u32,
     pub n_inter: u32,
     pub n_skip: u32,
+    /// I_PCM macroblocks (raw samples; only when coding would be larger).
+    pub n_pcm: u32,
     /// Inter macroblocks by partition type: 16x16, 16x8, 8x16, 8x8.
     pub parts: [u32; 4],
     /// 8x8 quadrants by sub-partition type: 8x8, 8x4, 4x8, 4x4.
@@ -120,7 +122,7 @@ pub struct Encoder {
 
 impl Encoder {
     pub fn new(cfg: Config) -> Result<Self, String> {
-        if cfg.width < 2 || cfg.height < 2 || cfg.width % 2 != 0 || cfg.height % 2 != 0 {
+        if cfg.width < 2 || cfg.height < 2 || !cfg.width.is_multiple_of(2) || !cfg.height.is_multiple_of(2) {
             return Err(format!(
                 "picture size {}x{} is not supported: 4:2:0 needs even width and height",
                 cfg.width, cfg.height
@@ -322,6 +324,7 @@ impl Encoder {
                 MbMode::I4 { .. } => stats.n_i4 += 1,
                 MbMode::I16 { .. } => stats.n_i16 += 1,
                 MbMode::Skip { .. } => stats.n_skip += 1,
+                MbMode::Pcm => stats.n_pcm += 1,
                 MbMode::Inter { part, sub, .. } => {
                     stats.n_inter += 1;
                     stats.parts[*part as usize] += 1;

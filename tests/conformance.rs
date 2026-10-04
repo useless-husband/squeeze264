@@ -5,9 +5,9 @@
 //! Needs `ffmpeg` on PATH (or $FFMPEG); tests skip with a message otherwise.
 
 use squeeze264::encoder::{Config, Encoder};
+use squeeze264::mp4::Mp4Writer;
 use squeeze264::ratecontrol::RcMode;
 use squeeze264::synth::{synth_frame, Pattern};
-use squeeze264::mp4::Mp4Writer;
 use squeeze264::verify::{check_decode, find_ffmpeg, has_videotoolbox, Decoder};
 use std::path::PathBuf;
 
@@ -111,7 +111,15 @@ fn harness_detects_a_single_wrong_sample() {
 
 #[test]
 fn p_frames_default_settings() {
-    for (qp, pattern) in [(20u8, Pattern::Moving), (28, Pattern::Moving), (36, Pattern::Moving), (45, Pattern::Moving), (26, Pattern::Still), (30, Pattern::Noise), (24, Pattern::Extremes)] {
+    for (qp, pattern) in [
+        (20u8, Pattern::Moving),
+        (28, Pattern::Moving),
+        (36, Pattern::Moving),
+        (45, Pattern::Moving),
+        (26, Pattern::Still),
+        (30, Pattern::Noise),
+        (24, Pattern::Extremes),
+    ] {
         let mut cfg = base(96, 80);
         cfg.rc = RcMode::ConstQp { qp, i_offset: 3 };
         let (clip, _) = encode(cfg, 12, pattern, 200 + qp as u64);
@@ -150,7 +158,10 @@ fn fuzz_random_decisions() {
 /// cropped by the SPS; the decoder must output exactly the visible area.
 #[test]
 fn cropped_sizes() {
-    for (i, (w, h)) in [(50, 38), (130, 74), (2, 2), (18, 16), (16, 18), (62, 46), (354, 290)].into_iter().enumerate() {
+    for (i, (w, h)) in [(50, 38), (130, 74), (2, 2), (18, 16), (16, 18), (62, 46), (354, 290)]
+        .into_iter()
+        .enumerate()
+    {
         let mut cfg = base(w, h);
         cfg.rc = RcMode::ConstQp { qp: 27, i_offset: 2 };
         let (clip, _) = encode(cfg, 6, Pattern::Moving, 300 + i as u64);
@@ -162,15 +173,22 @@ fn cropped_sizes() {
 /// Every encoder option on its own, on content with real motion.
 #[test]
 fn option_matrix() {
-    let variants: Vec<(&str, Box<dyn Fn(&mut Config)>)> = vec![
+    type Tweak = Box<dyn Fn(&mut Config)>;
+    let variants: Vec<(&str, Tweak)> = vec![
         ("subpel0", Box::new(|c| c.subpel = 0)),
         ("subpel1", Box::new(|c| c.subpel = 1)),
         ("no-partitions", Box::new(|c| c.partitions = false)),
         ("no-sub8x8", Box::new(|c| c.sub8x8 = false)),
         ("no-intra-in-p", Box::new(|c| c.intra_in_p = false)),
         ("no-deblock", Box::new(|c| c.deblock = false)),
-        ("deblock-strong", Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (6, 6))),
-        ("deblock-weak", Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (-6, -6))),
+        (
+            "deblock-strong",
+            Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (6, 6)),
+        ),
+        (
+            "deblock-weak",
+            Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (-6, -6)),
+        ),
         ("chroma-qp+6", Box::new(|c| c.chroma_qp_offset = 6)),
         ("chroma-qp-12", Box::new(|c| c.chroma_qp_offset = -12)),
         ("no-decimate", Box::new(|c| c.decimate = false)),
@@ -203,7 +221,10 @@ fn bitrate_mode() {
         assert_bit_exact(&format!("abr-{kbps}"), &clip, 176, 144, Decoder::FfmpegSoftware);
         let achieved = clip.stream.len() as f64 * 8.0 * 30.0 / frames as f64 / 1000.0;
         eprintln!("ABR target {kbps} kbit/s, achieved {achieved:.1} kbit/s");
-        assert!((achieved / kbps - 1.0).abs() < 0.2, "target {kbps}, achieved {achieved:.1}");
+        assert!(
+            (achieved / kbps - 1.0).abs() < 0.2,
+            "target {kbps}, achieved {achieved:.1}"
+        );
     }
 }
 
@@ -300,7 +321,11 @@ fn mp4_container_decodes_identically() {
         assert!(r.bit_exact(frames), "{}: {r:?}", d.name());
     }
     // ffprobe-style sanity through ffmpeg: frame rate and frame count survive.
-    let probe = std::process::Command::new(&ffmpeg).args(["-hide_banner", "-i"]).arg(&path).output().unwrap();
+    let probe = std::process::Command::new(&ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(&path)
+        .output()
+        .unwrap();
     let info = String::from_utf8_lossy(&probe.stderr).into_owned();
     assert!(info.contains("Constrained Baseline"), "{info}");
     assert!(info.contains("176x144"), "{info}");
@@ -317,14 +342,20 @@ fn real_clips() {
         return;
     };
     let mut ran = 0;
-    for (name, frames) in [("foreman_cif.y4m", 60), ("akiyo_cif.y4m", 40), ("mobile_cif.y4m", 40), ("shields_720p_100f.y4m", 12)] {
+    for (name, frames) in [
+        ("foreman_cif.y4m", 60),
+        ("akiyo_cif.y4m", 40),
+        ("mobile_cif.y4m", 40),
+        ("shields_720p_100f.y4m", 12),
+    ] {
         let path = dir.join(name);
         let Ok(file) = std::fs::File::open(&path) else {
             eprintln!("SKIP {name}: not in data/ (run `make data` to download the test clips)");
             continue;
         };
-        let mut reader = squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(file)).unwrap();
-        let hdr = reader.header;
+        let hdr = squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(file))
+            .unwrap()
+            .header;
         for qp in [22u8, 37] {
             let mut cfg = Config::new(hdr.width, hdr.height, hdr.fps_num, hdr.fps_den);
             cfg.rc = RcMode::ConstQp { qp, i_offset: 3 };
@@ -332,9 +363,10 @@ fn real_clips() {
             let (sps, pps) = enc.headers();
             let mut src = enc.new_input_frame();
             let (mut stream, mut recon) = (Vec::new(), Vec::new());
-            let mut reader2 = squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap())).unwrap();
+            let mut reader =
+                squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap())).unwrap();
             let mut n = 0;
-            while n < frames && reader2.read_frame(&mut src).unwrap() {
+            while n < frames && reader.read_frame(&mut src).unwrap() {
                 let out = enc.encode(&src);
                 if out.stats.idr {
                     sps.write_annexb(&mut stream);
@@ -344,15 +376,73 @@ fn real_clips() {
                 enc.recon().write_i420(hdr.width, hdr.height, &mut recon);
                 n += 1;
             }
-            let clip = Clip { stream, recon, frames: n };
+            let clip = Clip {
+                stream,
+                recon,
+                frames: n,
+            };
             let tag = format!("{}-qp{qp}", name.trim_end_matches(".y4m"));
             assert_bit_exact(&tag, &clip, hdr.width, hdr.height, Decoder::FfmpegSoftware);
             if has_videotoolbox(&ffmpeg) {
-                assert_bit_exact(&format!("{tag}-vt"), &clip, hdr.width, hdr.height, Decoder::VideoToolbox);
+                assert_bit_exact(
+                    &format!("{tag}-vt"),
+                    &clip,
+                    hdr.width,
+                    hdr.height,
+                    Decoder::VideoToolbox,
+                );
             }
         }
-        let _ = reader.read_frame(&mut Encoder::new(Config::new(hdr.width, hdr.height, 1, 1)).unwrap().new_input_frame());
         ran += 1;
     }
     eprintln!("real clips checked: {ran}");
+}
+
+/// Annex A limits macroblock_layer() to 3200 bits. Noise at QP 0 would
+/// exceed that, so the encoder must fall back to I_PCM, in I and P slices.
+#[test]
+fn oversized_macroblocks_fall_back_to_pcm() {
+    let mut cfg = base(176, 144);
+    cfg.rc = RcMode::ConstQp { qp: 0, i_offset: 0 };
+    cfg.keyint = 3;
+    let mut enc = Encoder::new(cfg).unwrap();
+    let (sps, pps) = enc.headers();
+    let (mut stream, mut recon) = (Vec::new(), Vec::new());
+    let mut pcm = [0u32; 2];
+    for i in 0..6 {
+        let src = synth_frame(176, 144, i, 6, Pattern::Noise, 77);
+        let out = enc.encode(&src);
+        if out.stats.idr {
+            sps.write_annexb(&mut stream);
+            pps.write_annexb(&mut stream);
+        }
+        out.nal.write_annexb(&mut stream);
+        enc.recon().write_i420(176, 144, &mut recon);
+        pcm[!out.stats.idr as usize] += out.stats.n_pcm;
+        for r in &out.records {
+            assert!(
+                r.bits <= squeeze264::mb::MAX_MB_BITS + 16,
+                "macroblock of {} bits",
+                r.bits
+            );
+        }
+        // I_PCM is lossless.
+        if out.stats.n_pcm as usize == out.records.len() {
+            assert_eq!(out.stats.sse, [0, 0, 0]);
+        }
+    }
+    assert!(
+        pcm[0] > 0 && pcm[1] > 0,
+        "expected I_PCM in both slice types, got {pcm:?}"
+    );
+    let clip = Clip {
+        stream,
+        recon,
+        frames: 6,
+    };
+    assert_bit_exact("pcm-fallback", &clip, 176, 144, Decoder::FfmpegSoftware);
+    // (QCIF because the VideoToolbox decoder refuses to open very small pictures.)
+    if find_ffmpeg().is_some_and(|f| has_videotoolbox(&f)) {
+        assert_bit_exact("pcm-fallback-vt", &clip, 176, 144, Decoder::VideoToolbox);
+    }
 }

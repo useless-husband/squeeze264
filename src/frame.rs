@@ -80,8 +80,7 @@ impl Plane {
         let bottom = (pad + h - 1) * stride;
         for y in 0..pad {
             self.data.copy_within(top..top + stride, y * stride);
-            self.data
-                .copy_within(bottom..bottom + stride, (pad + h + y) * stride);
+            self.data.copy_within(bottom..bottom + stride, (pad + h + y) * stride);
         }
     }
 }

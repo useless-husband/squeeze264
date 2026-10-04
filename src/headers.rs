@@ -48,7 +48,7 @@ pub fn write_sps(p: &StreamParams) -> Nal {
     let crop_b = p.mb_h * 16 - p.height;
     if crop_r > 0 || crop_b > 0 {
         w.put1(true); // frame_cropping_flag
-        // Crop units are two luma samples for 4:2:0 frames.
+                      // Crop units are two luma samples for 4:2:0 frames.
         w.ue(0);
         w.ue((crop_r / 2) as u32);
         w.ue(0);
@@ -57,7 +57,7 @@ pub fn write_sps(p: &StreamParams) -> Nal {
         w.put1(false);
     }
     w.put1(true); // vui_parameters_present_flag
-    // --- VUI ---
+                  // --- VUI ---
     w.put1(false); // aspect_ratio_info_present_flag
     w.put1(false); // overscan_info_present_flag
     w.put1(false); // video_signal_type_present_flag

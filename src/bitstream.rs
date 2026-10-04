@@ -45,7 +45,7 @@ impl BitWriter {
     pub fn ue(&mut self, v: u32) {
         let x = v as u64 + 1;
         let len = 64 - x.leading_zeros(); // number of significant bits
-        // len-1 zero bits, then x in len bits.
+                                          // len-1 zero bits, then x in len bits.
         if len > 1 {
             self.put_long(len - 1, 0);
         }
@@ -79,6 +79,32 @@ impl BitWriter {
         } else {
             self.put(n, value as u32);
         }
+    }
+
+    /// Remembers the current position so a failed attempt can be undone.
+    pub fn mark(&self) -> (usize, u64, u32) {
+        (self.buf.len(), self.acc, self.nbits)
+    }
+
+    /// Discards everything written after `mark`.
+    pub fn rewind(&mut self, mark: (usize, u64, u32)) {
+        self.buf.truncate(mark.0);
+        self.acc = mark.1;
+        self.nbits = mark.2;
+    }
+
+    /// Writes zero bits up to the next byte boundary (pcm_alignment_zero_bit).
+    pub fn align_zero(&mut self) {
+        if self.nbits > 0 {
+            let pad = 8 - self.nbits;
+            self.put(pad, 0);
+        }
+    }
+
+    /// Appends whole bytes; the writer must be byte aligned.
+    pub fn put_bytes(&mut self, bytes: &[u8]) {
+        debug_assert_eq!(self.nbits, 0);
+        self.buf.extend_from_slice(bytes);
     }
 
     /// Number of bits written so far.
@@ -154,11 +180,7 @@ impl Nal {
             bytes.push(b);
             zeros = if b == 0 { zeros + 1 } else { 0 };
         }
-        Nal {
-            kind,
-            ref_idc,
-            bytes,
-        }
+        Nal { kind, ref_idc, bytes }
     }
 
     /// Appends the NAL in Annex B byte-stream format (4-byte start code).
@@ -250,11 +272,7 @@ mod tests {
         let bytes = w.into_bytes();
         let mut s = String::new();
         for i in 0..n {
-            s.push(if bytes[i / 8] >> (7 - i % 8) & 1 == 1 {
-                '1'
-            } else {
-                '0'
-            });
+            s.push(if bytes[i / 8] >> (7 - i % 8) & 1 == 1 { '1' } else { '0' });
         }
         s
     }
@@ -322,6 +340,22 @@ mod tests {
     }
 
     #[test]
+    fn mark_and_rewind() {
+        let mut w = BitWriter::new();
+        w.put(11, 0x5a5);
+        let m = w.mark();
+        let len = w.bit_len();
+        w.ue(12345);
+        w.put(32, 0xdead_beef);
+        w.rewind(m);
+        assert_eq!(w.bit_len(), len);
+        w.align_zero();
+        assert_eq!(w.bit_len(), 16);
+        w.put_bytes(&[1, 2, 3]);
+        assert_eq!(w.into_bytes(), vec![0xb4, 0xa0, 1, 2, 3]);
+    }
+
+    #[test]
     fn emulation_prevention() {
         let rbsp = [0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0];
         let nal = Nal::new(NalType::Slice, 2, &rbsp);
@@ -332,9 +366,6 @@ mod tests {
             assert!(!(w[0] == 0 && w[1] == 0 && w[2] <= 2), "start code emulated");
         }
         assert_eq!(unescape(body), rbsp);
-        assert_eq!(
-            body,
-            &[0, 0, 3, 0, 0, 3, 0, 1, 0, 0, 3, 2, 0, 0, 3, 3, 0, 0, 4, 0, 0]
-        );
+        assert_eq!(body, &[0, 0, 3, 0, 0, 3, 0, 1, 0, 0, 3, 2, 0, 0, 3, 3, 0, 0, 4, 0, 0]);
     }
 }

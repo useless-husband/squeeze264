@@ -48,10 +48,22 @@ fn be16(v: &mut Vec<u8>, x: u16) {
 const UNITY_MATRIX: [u32; 9] = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x4000_0000];
 
 impl<W: Write + Seek> Mp4Writer<W> {
-    pub fn new(mut w: W, sps: &Nal, pps: &Nal, width: usize, height: usize, fps_num: u32, fps_den: u32) -> io::Result<Self> {
+    pub fn new(
+        mut w: W,
+        sps: &Nal,
+        pps: &Nal,
+        width: usize,
+        height: usize,
+        fps_num: u32,
+        fps_den: u32,
+    ) -> io::Result<Self> {
         // A coarse timescale such as 25 is legal but some players round
         // badly with it, so scale small rates up.
-        let (timescale, sample_delta) = if fps_num < 1000 { (fps_num * 1000, fps_den * 1000) } else { (fps_num, fps_den) };
+        let (timescale, sample_delta) = if fps_num < 1000 {
+            (fps_num * 1000, fps_den * 1000)
+        } else {
+            (fps_num, fps_den)
+        };
         let mut ftyp = Vec::new();
         ftyp.extend_from_slice(b"isom");
         be32(&mut ftyp, 0x200);
@@ -300,7 +312,10 @@ mod tests {
         let (mut s, mut e) = (0, data.len());
         for name in path {
             let b = boxes(data, s, e);
-            let hit = b.iter().find(|(k, _, _)| k == name).unwrap_or_else(|| panic!("box {name} missing"));
+            let hit = b
+                .iter()
+                .find(|(k, _, _)| k == name)
+                .unwrap_or_else(|| panic!("box {name} missing"));
             s = hit.1;
             e = hit.2;
         }
@@ -342,7 +357,10 @@ mod tests {
             assert!(off >= top[1].1 && off + size <= top[1].2);
         }
         let (ss, _) = find(&data, &[&stbl[..], &["stss"]].concat());
-        assert_eq!((u32_at(&data, ss + 4), u32_at(&data, ss + 8), u32_at(&data, ss + 12)), (2, 1, 4));
+        assert_eq!(
+            (u32_at(&data, ss + 4), u32_at(&data, ss + 8), u32_at(&data, ss + 12)),
+            (2, 1, 4)
+        );
         let (tt, _) = find(&data, &[&stbl[..], &["stts"]].concat());
         assert_eq!((u32_at(&data, tt + 8), u32_at(&data, tt + 12)), (5, 1001));
         let (mv, _) = find(&data, &["moov", "mvhd"]);
@@ -365,7 +383,8 @@ mod tests {
         let sps = Nal::new(NalType::Sps, 3, &[66, 0xc0, 13]);
         let pps = Nal::new(NalType::Pps, 3, &[0xce]);
         let mut m = Mp4Writer::new(Cursor::new(Vec::new()), &sps, &pps, 16, 16, 25, 1).unwrap();
-        m.write_sample(&Nal::new(NalType::IdrSlice, 3, &[1, 2, 3]), true).unwrap();
+        m.write_sample(&Nal::new(NalType::IdrSlice, 3, &[1, 2, 3]), true)
+            .unwrap();
         let data = m.finish().unwrap().into_inner();
         let (mv, _) = find(&data, &["moov", "mvhd"]);
         assert_eq!((u32_at(&data, mv + 12), u32_at(&data, mv + 16)), (25000, 1000));

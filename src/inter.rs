@@ -188,14 +188,39 @@ pub(crate) mod tests {
     pub fn luma_sample_spec(p: &Plane, xi: i32, yi: i32, xf: i32, yf: i32) -> u8 {
         let px = |x: i32, y: i32| p.at_clamped(x, y) as i32;
         let clip = |v: i32| v.clamp(0, 255);
-        let b1 = |x: i32, y: i32| tap6(px(x - 2, y), px(x - 1, y), px(x, y), px(x + 1, y), px(x + 2, y), px(x + 3, y));
-        let h1 = |x: i32, y: i32| tap6(px(x, y - 2), px(x, y - 1), px(x, y), px(x, y + 1), px(x, y + 2), px(x, y + 3));
+        let b1 = |x: i32, y: i32| {
+            tap6(
+                px(x - 2, y),
+                px(x - 1, y),
+                px(x, y),
+                px(x + 1, y),
+                px(x + 2, y),
+                px(x + 3, y),
+            )
+        };
+        let h1 = |x: i32, y: i32| {
+            tap6(
+                px(x, y - 2),
+                px(x, y - 1),
+                px(x, y),
+                px(x, y + 1),
+                px(x, y + 2),
+                px(x, y + 3),
+            )
+        };
         let g = px(xi, yi);
         let b = clip((b1(xi, yi) + 16) >> 5);
         let h = clip((h1(xi, yi) + 16) >> 5);
         let m = clip((h1(xi + 1, yi) + 16) >> 5);
         let s = clip((b1(xi, yi + 1) + 16) >> 5);
-        let j1 = tap6(b1(xi, yi - 2), b1(xi, yi - 1), b1(xi, yi), b1(xi, yi + 1), b1(xi, yi + 2), b1(xi, yi + 3));
+        let j1 = tap6(
+            b1(xi, yi - 2),
+            b1(xi, yi - 1),
+            b1(xi, yi),
+            b1(xi, yi + 1),
+            b1(xi, yi + 2),
+            b1(xi, yi + 3),
+        );
         let j = clip((j1 + 512) >> 10);
         let avg = |a: i32, b: i32| (a + b + 1) >> 1;
         let v = match (xf, yf) {
@@ -291,7 +316,12 @@ pub(crate) mod tests {
         let mut dst = [0u8; 256];
         for fy in 0..4 {
             for fx in 0..4 {
-                for (bx, by) in [(-MV_BORDER, -MV_BORDER), (MV_BORDER, MV_BORDER), (-MV_BORDER, MV_BORDER), (0, 0)] {
+                for (bx, by) in [
+                    (-MV_BORDER, -MV_BORDER),
+                    (MV_BORDER, MV_BORDER),
+                    (-MV_BORDER, MV_BORDER),
+                    (0, 0),
+                ] {
                     let mv = [(bx * 4 + fx) as i16, (by * 4 + fy) as i16];
                     if bx == MV_BORDER && fx != 0 || by == MV_BORDER && fy != 0 {
                         continue;
@@ -321,8 +351,14 @@ pub(crate) mod tests {
             let plane = case % 2;
             let x = rng.range(0, (w / 2 - bw) as i32);
             let y = rng.range(0, (h / 2 - bh) as i32);
-            let mvx = rng.range((-MV_BORDER - 2 * x) * 4, (w as i32 + MV_BORDER - 2 * bw as i32 - 2 * x) * 4);
-            let mvy = rng.range((-MV_BORDER - 2 * y) * 4, (h as i32 + MV_BORDER - 2 * bh as i32 - 2 * y) * 4);
+            let mvx = rng.range(
+                (-MV_BORDER - 2 * x) * 4,
+                (w as i32 + MV_BORDER - 2 * bw as i32 - 2 * x) * 4,
+            );
+            let mvy = rng.range(
+                (-MV_BORDER - 2 * y) * 4,
+                (h as i32 + MV_BORDER - 2 * bh as i32 - 2 * y) * 4,
+            );
             let mv = [mvx as i16, mvy as i16];
             r.mc_chroma(plane, x, y, mv, bw, bh, &mut dst, 8);
             for yy in 0..bh {

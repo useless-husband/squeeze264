@@ -58,10 +58,8 @@ impl<R: BufRead> Y4mReader<R> {
                         )));
                     }
                 }
-                "I" => {
-                    if !matches!(val, "p" | "?") {
-                        return Err(bad("interlaced input is not supported"));
-                    }
+                "I" if !matches!(val, "p" | "?") => {
+                    return Err(bad("interlaced input is not supported"));
                 }
                 _ => {}
             }
@@ -98,11 +96,7 @@ impl<R: BufRead> Y4mReader<R> {
         }
         let (w, h) = (self.header.width, self.header.height);
         for (i, p) in frame.planes.iter_mut().enumerate() {
-            let (pw, ph) = if i == 0 {
-                (w, h)
-            } else {
-                (w.div_ceil(2), h.div_ceil(2))
-            };
+            let (pw, ph) = if i == 0 { (w, h) } else { (w.div_ceil(2), h.div_ceil(2)) };
             for y in 0..ph {
                 self.r.read_exact(&mut p.row_mut(y)[..pw])?;
             }

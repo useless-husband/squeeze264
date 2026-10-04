@@ -36,7 +36,8 @@ pub fn satd4x4(a: &[u8], a_stride: usize, b: &[u8], b_stride: usize) -> u32 {
     for c in 0..4 {
         let (s0, s1) = (d[c] + d[4 + c], d[c] - d[4 + c]);
         let (s2, s3) = (d[8 + c] + d[12 + c], d[8 + c] - d[12 + c]);
-        sum += (s0 + s2).unsigned_abs() + (s1 + s3).unsigned_abs() + (s0 - s2).unsigned_abs() + (s1 - s3).unsigned_abs();
+        sum +=
+            (s0 + s2).unsigned_abs() + (s1 + s3).unsigned_abs() + (s0 - s2).unsigned_abs() + (s1 - s3).unsigned_abs();
     }
     sum.div_ceil(2)
 }

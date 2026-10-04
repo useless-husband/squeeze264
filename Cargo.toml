@@ -14,3 +14,9 @@ debug = false
 
 [profile.test]
 opt-level = 2
+
+[lints.clippy]
+# Codec kernels index several arrays with the same coordinates and pass
+# block geometry explicitly; iterator rewrites would obscure the equations.
+needless_range_loop = "allow"
+too_many_arguments = "allow"

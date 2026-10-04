@@ -12,7 +12,7 @@ use crate::frame::{Frame, Plane};
 use crate::inter::{Mv, RefPic, MV_BORDER};
 use crate::intra::{self, Edge16, Edge4, Edge8};
 use crate::rng::Rng;
-use crate::state::{PicState, MB_I16X16, MB_I4X4, MB_INTER, MB_SKIP};
+use crate::state::{PicState, MB_I16X16, MB_I4X4, MB_INTER, MB_PCM, MB_SKIP};
 use crate::tables::{cbp_code, chroma_qp, BLK_IDX, BLK_X, BLK_Y, ZIGZAG};
 use crate::transform::*;
 
@@ -65,17 +65,42 @@ pub fn partitions(part: u8, sub: &[u8; 4], out: &mut [Part; 16]) -> usize {
     let mut n = 0;
     match part {
         PART_16X16 => {
-            out[0] = Part { bx: 0, by: 0, pw: 4, ph: 4 };
+            out[0] = Part {
+                bx: 0,
+                by: 0,
+                pw: 4,
+                ph: 4,
+            };
             n = 1;
         }
         PART_16X8 => {
-            out[0] = Part { bx: 0, by: 0, pw: 4, ph: 2 };
-            out[1] = Part { bx: 0, by: 2, pw: 4, ph: 2 };
+            out[0] = Part {
+                bx: 0,
+                by: 0,
+                pw: 4,
+                ph: 2,
+            };
+            out[1] = Part {
+                bx: 0,
+                by: 2,
+                pw: 4,
+                ph: 2,
+            };
             n = 2;
         }
         PART_8X16 => {
-            out[0] = Part { bx: 0, by: 0, pw: 2, ph: 4 };
-            out[1] = Part { bx: 2, by: 0, pw: 2, ph: 4 };
+            out[0] = Part {
+                bx: 0,
+                by: 0,
+                pw: 2,
+                ph: 4,
+            };
+            out[1] = Part {
+                bx: 2,
+                by: 0,
+                pw: 2,
+                ph: 4,
+            };
             n = 2;
         }
         _ => {
@@ -90,15 +115,31 @@ pub fn partitions(part: u8, sub: &[u8; 4], out: &mut [Part; 16]) -> usize {
 #[derive(Clone, Debug)]
 pub enum MbMode {
     /// Intra 4x4 with one prediction mode per block (indexed by luma4x4BlkIdx).
-    I4 { modes: [u8; 16] },
-    I16 { mode: u8 },
+    I4 {
+        modes: [u8; 16],
+    },
+    I16 {
+        mode: u8,
+    },
     /// Motion vectors are stored per 4x4 block in raster order.
-    Inter { part: u8, sub: [u8; 4], mvs: [Mv; 16] },
-    Skip { mv: Mv },
+    Inter {
+        part: u8,
+        sub: [u8; 4],
+        mvs: [Mv; 16],
+    },
+    Skip {
+        mv: Mv,
+    },
+    /// Raw samples (I_PCM): the fallback when coding would exceed the
+    /// 3200-bit macroblock limit of Annex A.
+    Pcm,
 }
 
+/// Annex A.3.1: macroblock_layer() must not exceed this many bits.
+pub const MAX_MB_BITS: u32 = 3200;
+
 /// Quantised coefficients of one macroblock, in scan order.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Residual {
     /// Per luma4x4BlkIdx; for Intra16x16 entry 0 of each block is unused.
     pub luma: [[i32; 16]; 16],
@@ -108,18 +149,6 @@ pub struct Residual {
     pub chroma_ac: [[[i32; 16]; 4]; 2],
     /// coded_block_pattern: bits 0..3 luma 8x8 blocks, bits 4..5 chroma (0, 1 or 2).
     pub cbp: u8,
-}
-
-impl Default for Residual {
-    fn default() -> Self {
-        Residual {
-            luma: [[0; 16]; 16],
-            luma_dc: [0; 16],
-            chroma_dc: [[0; 4]; 2],
-            chroma_ac: [[[0; 16]; 4]; 2],
-            cbp: 0,
-        }
-    }
 }
 
 /// Test hook: forces parts of the residual to zero so that every
@@ -232,7 +261,10 @@ impl MbCoder<'_> {
         // The 16x16 block may reach MV_BORDER samples outside the picture;
         // partitions inside the macroblock then stay inside that area too.
         self.mv_min = [(-MV_BORDER - x0) * 4, ((-MV_BORDER - y0) * 4).max(-self.max_vmv_q)];
-        self.mv_max = [(w + MV_BORDER - 16 - x0) * 4, ((h + MV_BORDER - 16 - y0) * 4).min(self.max_vmv_q - 1)];
+        self.mv_max = [
+            (w + MV_BORDER - 16 - x0) * 4,
+            ((h + MV_BORDER - 16 - y0) * 4).min(self.max_vmv_q - 1),
+        ];
     }
 
     #[inline]
@@ -352,7 +384,15 @@ impl MbCoder<'_> {
 
     /// Transforms and quantises the luma residual against `pred`, applies
     /// thresholding and forced zeroing, then reconstructs into the picture.
-    pub fn luma_residual(&mut self, pred: &[u8; 256], qp: u8, i16: bool, intra: bool, force: Force, res: &mut Residual) {
+    pub fn luma_residual(
+        &mut self,
+        pred: &[u8; 256],
+        qp: u8,
+        i16: bool,
+        intra: bool,
+        force: Force,
+        res: &mut Residual,
+    ) {
         let mut lv = [[0i32; 16]; 16];
         let mut dc = [0i32; 16];
         let mut nz = [0u32; 16];
@@ -456,7 +496,14 @@ impl MbCoder<'_> {
     /// Codes the sixteen 4x4 blocks in decoding order. With `modes` None the
     /// best mode per block is chosen by SATD + lambda * mode bits.
     /// Returns the modes used and the accumulated cost.
-    pub fn encode_i4(&mut self, modes: Option<&[u8; 16]>, qp: u8, force: Force, lambda16: u32, res: &mut Residual) -> ([u8; 16], u32) {
+    pub fn encode_i4(
+        &mut self,
+        modes: Option<&[u8; 16]>,
+        qp: u8,
+        force: Force,
+        lambda16: u32,
+        res: &mut Residual,
+    ) -> ([u8; 16], u32) {
         let mut used = [0u8; 16];
         let mut total_cost = 0u32;
         let mut cbp = 0u8;
@@ -665,8 +712,16 @@ impl MbCoder<'_> {
 
     #[inline]
     fn nc(nnz: &[u8], stride: usize, x: usize, y: usize) -> i32 {
-        let a = if x > 0 { Some(nnz[y * stride + x - 1] as i32) } else { None };
-        let b = if y > 0 { Some(nnz[(y - 1) * stride + x] as i32) } else { None };
+        let a = if x > 0 {
+            Some(nnz[y * stride + x - 1] as i32)
+        } else {
+            None
+        };
+        let b = if y > 0 {
+            Some(nnz[(y - 1) * stride + x] as i32)
+        } else {
+            None
+        };
         match (a, b) {
             (Some(a), Some(b)) => (a + b + 1) >> 1,
             (Some(a), None) => a,
@@ -675,9 +730,73 @@ impl MbCoder<'_> {
         }
     }
 
+    /// Codes the macroblock as I_PCM: the source samples verbatim.
+    fn write_pcm(&mut self) {
+        let mb = self.mb_index();
+        let (mb_x, mb_y) = (self.mb_x, self.mb_y);
+        let w4 = self.st.mb_w * 4;
+        let w2 = self.st.mb_w * 2;
+        let start_bits = self.bw.bit_len();
+        // Neighbours see sixteen coefficients in every block of an I_PCM macroblock.
+        for y in 0..4 {
+            let o = (mb_y * 4 + y) * w4 + mb_x * 4;
+            self.st.nnz_y[o..o + 4].fill(16);
+            self.st.i4mode[o..o + 4].fill(intra::I4_DC);
+        }
+        for plane in 0..2 {
+            for y in 0..2 {
+                let o = (mb_y * 2 + y) * w2 + mb_x * 2;
+                self.st.nnz_c[plane][o..o + 2].fill(16);
+            }
+        }
+        self.st.motion.fill(mb_x, mb_y, 0, 0, 4, 4, -1, [0, 0]);
+        if self.is_p {
+            self.bw.ue(self.skip_run);
+            self.skip_run = 0;
+        }
+        self.bw.ue(if self.is_p { 30 } else { 25 }); // mb_type I_PCM
+        self.bw.align_zero();
+        self.bw.put_bytes(&self.cur_y);
+        self.bw.put_bytes(&self.cur_c[0]);
+        self.bw.put_bytes(&self.cur_c[1]);
+        put_block(&mut self.recon.planes[0], mb_x * 16, mb_y * 16, 16, 16, &self.cur_y);
+        put_block(&mut self.recon.planes[1], mb_x * 8, mb_y * 8, 8, 8, &self.cur_c[0]);
+        put_block(&mut self.recon.planes[2], mb_x * 8, mb_y * 8, 8, 8, &self.cur_c[1]);
+        self.st.kind[mb] = MB_PCM;
+        // The deblocking filter treats I_PCM as QP 0; QP prediction for the
+        // next macroblock is unaffected (prev_qp stays).
+        self.st.qp[mb] = 0;
+        self.records.push(MbRecord {
+            mode: MbMode::Pcm,
+            chroma_mode: 0,
+            qp: 0,
+            cbp: 0,
+            bits: (self.bw.bit_len() - start_bits) as u32,
+        });
+    }
+
     /// Writes the macroblock (or extends the skip run) and updates all
-    /// neighbour context. `qp` is the QP the residual was quantised with.
+    /// neighbour context. Falls back to I_PCM if the coded form would be
+    /// larger than the level limits allow.
     pub fn write_mb(&mut self, coded: &Coded) {
+        if let MbMode::Pcm = coded.mode {
+            self.write_pcm();
+            return;
+        }
+        let mark = self.bw.mark();
+        let saved = (self.skip_run, self.prev_qp, self.records.len());
+        let layer_bits = self.write_mb_coded(coded);
+        if layer_bits > MAX_MB_BITS {
+            self.bw.rewind(mark);
+            self.skip_run = saved.0;
+            self.prev_qp = saved.1;
+            self.records.truncate(saved.2);
+            self.write_pcm();
+        }
+    }
+
+    /// Returns the size of macroblock_layer() in bits (0 for a skip).
+    fn write_mb_coded(&mut self, coded: &Coded) -> u32 {
         let mb = self.mb_index();
         let (mb_x, mb_y) = (self.mb_x, self.mb_y);
         let w4 = self.st.mb_w * 4;
@@ -728,13 +847,14 @@ impl MbCoder<'_> {
                 cbp: 0,
                 bits: 0,
             });
-            return;
+            return 0;
         }
 
         if self.is_p {
             self.bw.ue(self.skip_run);
             self.skip_run = 0;
         }
+        let layer_start = self.bw.bit_len();
         let cbp = res.cbp;
         let (cbp_luma, cbp_chroma) = (cbp & 15, cbp >> 4);
         let intra_offset = if self.is_p { 5 } else { 0 };
@@ -749,7 +869,8 @@ impl MbCoder<'_> {
                         self.bw.put1(true); // prev_intra4x4_pred_mode_flag
                     } else {
                         self.bw.put1(false);
-                        self.bw.put(3, if m < predicted { m } else { m - 1 } as u32); // rem_intra4x4_pred_mode
+                        self.bw.put(3, if m < predicted { m } else { m - 1 } as u32);
+                        // rem_intra4x4_pred_mode
                     }
                 }
                 self.bw.ue(coded.chroma_mode as u32);
@@ -782,7 +903,7 @@ impl MbCoder<'_> {
                 }
                 self.st.kind[mb] = MB_INTER;
             }
-            MbMode::Skip { .. } => unreachable!(),
+            MbMode::Skip { .. } | MbMode::Pcm => unreachable!(),
         }
         if !is_i16 {
             self.bw.ue(cbp_code(cbp, self.st.kind[mb] == MB_I4X4));
@@ -803,7 +924,11 @@ impl MbCoder<'_> {
                 }
                 let (x, y) = (mb_x * 4 + BLK_X[blk], mb_y * 4 + BLK_Y[blk]);
                 let nc = Self::nc(&self.st.nnz_y, w4, x, y);
-                let coeffs = if is_i16 { &res.luma[blk][1..] } else { &res.luma[blk][..] };
+                let coeffs = if is_i16 {
+                    &res.luma[blk][1..]
+                } else {
+                    &res.luma[blk][..]
+                };
                 self.st.nnz_y[y * w4 + x] = write_block(self.bw, coeffs, nc, self.cov);
             }
             if cbp_chroma > 0 {
@@ -816,7 +941,8 @@ impl MbCoder<'_> {
                     for blk in 0..4 {
                         let (x, y) = (mb_x * 2 + blk % 2, mb_y * 2 + blk / 2);
                         let nc = Self::nc(&self.st.nnz_c[plane], w2, x, y);
-                        self.st.nnz_c[plane][y * w2 + x] = write_block(self.bw, &res.chroma_ac[plane][blk][1..], nc, self.cov);
+                        self.st.nnz_c[plane][y * w2 + x] =
+                            write_block(self.bw, &res.chroma_ac[plane][blk][1..], nc, self.cov);
                     }
                 }
             }
@@ -830,6 +956,7 @@ impl MbCoder<'_> {
             cbp,
             bits: (self.bw.bit_len() - start_bits) as u32,
         });
+        (self.bw.bit_len() - layer_start) as u32
     }
 }
 
@@ -842,15 +969,63 @@ mod tests {
         let mut out = [Part::default(); 16];
         assert_eq!(partitions(PART_16X16, &[0; 4], &mut out), 1);
         assert_eq!(partitions(PART_16X8, &[0; 4], &mut out), 2);
-        assert_eq!(out[1], Part { bx: 0, by: 2, pw: 4, ph: 2 });
+        assert_eq!(
+            out[1],
+            Part {
+                bx: 0,
+                by: 2,
+                pw: 4,
+                ph: 2
+            }
+        );
         assert_eq!(partitions(PART_8X16, &[0; 4], &mut out), 2);
-        assert_eq!(out[1], Part { bx: 2, by: 0, pw: 2, ph: 4 });
+        assert_eq!(
+            out[1],
+            Part {
+                bx: 2,
+                by: 0,
+                pw: 2,
+                ph: 4
+            }
+        );
         let n = partitions(PART_8X8, &[SUB_8X8, SUB_8X4, SUB_4X8, SUB_4X4], &mut out);
         assert_eq!(n, 1 + 2 + 2 + 4);
-        assert_eq!(out[0], Part { bx: 0, by: 0, pw: 2, ph: 2 });
-        assert_eq!(out[2], Part { bx: 2, by: 1, pw: 2, ph: 1 });
-        assert_eq!(out[4], Part { bx: 1, by: 2, pw: 1, ph: 2 });
-        assert_eq!(out[8], Part { bx: 3, by: 3, pw: 1, ph: 1 });
+        assert_eq!(
+            out[0],
+            Part {
+                bx: 0,
+                by: 0,
+                pw: 2,
+                ph: 2
+            }
+        );
+        assert_eq!(
+            out[2],
+            Part {
+                bx: 2,
+                by: 1,
+                pw: 2,
+                ph: 1
+            }
+        );
+        assert_eq!(
+            out[4],
+            Part {
+                bx: 1,
+                by: 2,
+                pw: 1,
+                ph: 2
+            }
+        );
+        assert_eq!(
+            out[8],
+            Part {
+                bx: 3,
+                by: 3,
+                pw: 1,
+                ph: 1
+            }
+        );
         // Every list tiles the macroblock exactly once.
         for part in 0..4u8 {
             for s in 0..4u8 {

@@ -151,7 +151,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             "--size" => {
                 let v: String = parse("--size", args.next())?;
                 let (w, h) = v.split_once('x').ok_or("--size expects WxH")?;
-                o.size = (w.parse().map_err(|_| "bad --size")?, h.parse().map_err(|_| "bad --size")?);
+                o.size = (
+                    w.parse().map_err(|_| "bad --size")?,
+                    h.parse().map_err(|_| "bad --size")?,
+                );
             }
             "--fps" => o.fps = parse("--fps", args.next())?,
             "--seed" => o.seed = parse("--seed", args.next())?,
@@ -192,7 +195,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
 
 fn is_mp4(p: &Path) -> bool {
     matches!(
-        p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
+        p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
         Some("mp4" | "m4v" | "mov")
     )
 }
@@ -225,7 +231,11 @@ impl Summary {
     fn global_psnr(&self) -> [f64; 3] {
         std::array::from_fn(|i| {
             let sse: u64 = self.frames.iter().map(|f| f.sse[i]).sum();
-            let n = if i == 0 { self.width * self.height } else { self.width * self.height / 4 };
+            let n = if i == 0 {
+                self.width * self.height
+            } else {
+                self.width * self.height / 4
+            };
             psnr(sse, (n * self.frames.len().max(1)) as u64)
         })
     }
@@ -250,11 +260,14 @@ fn frame_line(s: &FrameStats) -> String {
 
 fn run_encode(o: &Options) -> Result<Summary, String> {
     let file = File::open(&o.input).map_err(|e| format!("cannot open {}: {e}", o.input.display()))?;
-    let mut reader = Y4mReader::new(BufReader::with_capacity(1 << 20, file)).map_err(|e| format!("{}: {e}", o.input.display()))?;
+    let mut reader =
+        Y4mReader::new(BufReader::with_capacity(1 << 20, file)).map_err(|e| format!("{}: {e}", o.input.display()))?;
     let h = reader.header;
     let mut cfg = Config::new(h.width, h.height, h.fps_num, h.fps_den);
     cfg.rc = match o.bitrate {
-        Some(kbps) => RcMode::Abr { bps: kbps as f64 * 1000.0 },
+        Some(kbps) => RcMode::Abr {
+            bps: kbps as f64 * 1000.0,
+        },
         None => RcMode::ConstQp {
             qp: o.qp,
             i_offset: o.i_qp_offset,
@@ -280,7 +293,18 @@ fn run_encode(o: &Options) -> Result<Summary, String> {
     let mut mp4: Vec<Mp4Writer<BufWriter<File>>> = Vec::new();
     for p in &o.outputs {
         if is_mp4(p) {
-            mp4.push(Mp4Writer::new(BufWriter::new(create(p)?), &sps, &pps, h.width, h.height, h.fps_num, h.fps_den).map_err(|e| e.to_string())?);
+            mp4.push(
+                Mp4Writer::new(
+                    BufWriter::new(create(p)?),
+                    &sps,
+                    &pps,
+                    h.width,
+                    h.height,
+                    h.fps_num,
+                    h.fps_den,
+                )
+                .map_err(|e| e.to_string())?,
+            );
         } else {
             annexb.push(BufWriter::new(create(p)?));
         }
@@ -314,10 +338,17 @@ fn run_encode(o: &Options) -> Result<Summary, String> {
         if o.frames.is_some_and(|n| stats.len() >= n) {
             break;
         }
-        if !reader.read_frame(&mut src).map_err(|e| format!("{}: {e}", o.input.display()))? {
+        if !reader
+            .read_frame(&mut src)
+            .map_err(|e| format!("{}: {e}", o.input.display()))?
+        {
             break;
         }
-        let EncodedFrame { nal, stats: fs, records } = enc.encode(&src);
+        let EncodedFrame {
+            nal,
+            stats: fs,
+            records,
+        } = enc.encode(&src);
         buf.clear();
         if fs.idr {
             sps.write_annexb(&mut buf);
@@ -372,7 +403,10 @@ fn run_encode(o: &Options) -> Result<Summary, String> {
     for m in mp4 {
         m.finish().map_err(io_err)?;
     }
-    for w in [recon_y4m.as_mut(), recon_raw.as_mut(), md5_out.as_mut()].into_iter().flatten() {
+    for w in [recon_y4m.as_mut(), recon_raw.as_mut(), md5_out.as_mut()]
+        .into_iter()
+        .flatten()
+    {
         w.flush().map_err(io_err)?;
     }
     if stats.is_empty() {
@@ -419,7 +453,8 @@ fn print_summary(s: &Summary) {
 fn write_stats(path: &Path, o: &Options, s: &Summary) -> Result<(), String> {
     let mut j = String::new();
     let p = s.global_psnr();
-    let _ = write!(
+    let _ =
+        write!(
         j,
         "{{\n\"input\":\"{}\",\n\"width\":{},\"height\":{},\"fps\":{:.4},\"level_idc\":{},\n\"mb_w\":{},\"mb_h\":{},\n",
         o.input.file_name().map(|f| f.to_string_lossy().replace(['"', '\\'], "_")).unwrap_or_default(),
@@ -444,9 +479,9 @@ fn write_stats(path: &Path, o: &Options, s: &Summary) -> Result<(), String> {
         s.frames.len() as f64 / s.seconds
     );
     for (i, f) in s.frames.iter().enumerate() {
-        let _ = write!(
+        let _ = writeln!(
             j,
-            "{{\"i\":{},\"type\":\"{}\",\"qp\":{},\"bytes\":{},\"psnr\":[{:.3},{:.3},{:.3}],\"i4\":{},\"i16\":{},\"inter\":{},\"skip\":{},\"parts\":[{},{},{},{}],\"subs\":[{},{},{},{}]}}{}\n",
+            "{{\"i\":{},\"type\":\"{}\",\"qp\":{},\"bytes\":{},\"psnr\":[{:.3},{:.3},{:.3}],\"i4\":{},\"i16\":{},\"inter\":{},\"skip\":{},\"pcm\":{},\"parts\":[{},{},{},{}],\"subs\":[{},{},{},{}]}}{}",
             f.index,
             if f.idr { "I" } else { "P" },
             f.qp,
@@ -458,6 +493,7 @@ fn write_stats(path: &Path, o: &Options, s: &Summary) -> Result<(), String> {
             f.n_i16,
             f.n_inter,
             f.n_skip,
+            f.n_pcm,
             f.parts[0],
             f.parts[1],
             f.parts[2],
@@ -469,7 +505,7 @@ fn write_stats(path: &Path, o: &Options, s: &Summary) -> Result<(), String> {
             if i + 1 < s.frames.len() { "," } else { "" }
         );
     }
-    j.push_str("]");
+    j.push(']');
     if let Some((index, records)) = &s.viz {
         let _ = write!(j, ",\n\"viz\":{{\"frame\":{index},\"mbs\":[\n");
         for (i, r) in records.iter().enumerate() {
@@ -477,11 +513,14 @@ fn write_stats(path: &Path, o: &Options, s: &Summary) -> Result<(), String> {
                 MbMode::I4 { modes } => format!("\"t\":\"I4\",\"modes\":{modes:?}"),
                 MbMode::I16 { mode } => format!("\"t\":\"I16\",\"mode\":{mode}"),
                 MbMode::Skip { mv } => format!("\"t\":\"S\",\"mv\":{mv:?}"),
-                MbMode::Inter { part, sub, mvs } => format!("\"t\":\"P\",\"part\":{part},\"sub\":{sub:?},\"mv\":{mvs:?}"),
+                MbMode::Pcm => "\"t\":\"PCM\"".to_string(),
+                MbMode::Inter { part, sub, mvs } => {
+                    format!("\"t\":\"P\",\"part\":{part},\"sub\":{sub:?},\"mv\":{mvs:?}")
+                }
             };
-            let _ = write!(
+            let _ = writeln!(
                 j,
-                "{{{body},\"qp\":{},\"cbp\":{},\"bits\":{}}}{}\n",
+                "{{{body},\"qp\":{},\"cbp\":{},\"bits\":{}}}{}",
                 r.qp,
                 r.cbp,
                 r.bits,
@@ -529,7 +568,10 @@ fn cmd_check(o: &mut Options) -> Result<(), String> {
             write_stats(p, o, &s)?;
         }
         let n = s.frames.len();
-        let mut runs = vec![(Decoder::FfmpegSoftware, &h264, "Annex B"), (Decoder::FfmpegSoftware, &mp4, "MP4")];
+        let mut runs = vec![
+            (Decoder::FfmpegSoftware, &h264, "Annex B"),
+            (Decoder::FfmpegSoftware, &mp4, "MP4"),
+        ];
         if has_videotoolbox(&ffmpeg) {
             runs.push((Decoder::VideoToolbox, &h264, "Annex B"));
             runs.push((Decoder::VideoToolbox, &mp4, "MP4"));
@@ -540,6 +582,16 @@ fn cmd_check(o: &mut Options) -> Result<(), String> {
         for (decoder, path, container) in runs {
             let expected = BufReader::new(File::open(&raw).map_err(|e| e.to_string())?);
             let r = check_decode(&ffmpeg, decoder, path, s.width, s.height, expected).map_err(|e| e.to_string())?;
+            if r.hw_refused {
+                println!(
+                    "SKIP  {:42} {:8} the hardware decoder refused to open a {}x{} stream (it needs at least 64x64)",
+                    decoder.name(),
+                    container,
+                    s.width,
+                    s.height
+                );
+                continue;
+            }
             let ok = r.bit_exact(n);
             all_ok &= ok;
             println!(
@@ -549,7 +601,11 @@ fn cmd_check(o: &mut Options) -> Result<(), String> {
                 container,
                 r.decoded_frames - r.mismatches.len().min(r.decoded_frames),
                 n,
-                if r.stderr.trim().is_empty() { ", decoder silent".to_string() } else { format!(", decoder said: {}", r.stderr.trim()) }
+                if r.stderr.trim().is_empty() {
+                    ", decoder silent".to_string()
+                } else {
+                    format!(", decoder said: {}", r.stderr.trim())
+                }
             );
             if let Some((f, plane, x, y, want, got)) = r.first_diff {
                 println!("      first difference: frame {f} plane {plane} at ({x},{y}): encoder {want}, decoder {got}");

@@ -167,7 +167,11 @@ mod tests {
             }
             let achieved = total as f64 * 30.0 / frames as f64;
             let err = (achieved / bps - 1.0).abs();
-            assert!(err < 0.08, "target {bps}, achieved {achieved:.0} ({:.1}% off)", err * 100.0);
+            assert!(
+                err < 0.08,
+                "target {bps}, achieved {achieved:.0} ({:.1}% off)",
+                err * 100.0
+            );
         }
     }
 
@@ -180,7 +184,11 @@ mod tests {
             let idr = i == 0;
             let qp = rc.frame_qp(idr);
             let cplx = if i < 100 { 30_000.0 } else { 120_000.0 };
-            rc.update(idr, qp, (cplx * if idr { 6.0 } else { 1.0 } / qscale(qp as f64)) as usize);
+            rc.update(
+                idr,
+                qp,
+                (cplx * if idr { 6.0 } else { 1.0 } / qscale(qp as f64)) as usize,
+            );
             qps.push(qp);
         }
         // Four times the complexity needs about 12 QP steps more.

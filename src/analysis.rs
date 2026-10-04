@@ -192,7 +192,15 @@ impl MbCoder<'_> {
                 mv8[q] = mv;
                 let mut q_cost = cost + Self::bit_cost(lam, 1);
                 let mut q_sub = SUB_8X8;
-                let mut q_mvs = [(Part { bx: qx, by: qy, pw: 2, ph: 2 }, mv); 4];
+                let mut q_mvs = [(
+                    Part {
+                        bx: qx,
+                        by: qy,
+                        pw: 2,
+                        ph: 2,
+                    },
+                    mv,
+                ); 4];
                 let mut q_n = 1;
                 if self.sub8x8_ok && self.cfg.sub8x8 && cost > 64 + Self::bit_cost(lam, 12) {
                     for sub in [SUB_8X4, SUB_4X8, SUB_4X4] {
@@ -241,9 +249,25 @@ impl MbCoder<'_> {
                 };
                 for i in 0..2 {
                     let (p, seeds) = if part == PART_16X8 {
-                        (Part { bx: 0, by: i * 2, pw: 4, ph: 2 }, [mv8[i * 2], mv8[i * 2 + 1], mv16])
+                        (
+                            Part {
+                                bx: 0,
+                                by: i * 2,
+                                pw: 4,
+                                ph: 2,
+                            },
+                            [mv8[i * 2], mv8[i * 2 + 1], mv16],
+                        )
                     } else {
-                        (Part { bx: i * 2, by: 0, pw: 2, ph: 4 }, [mv8[i], mv8[i + 2], mv16])
+                        (
+                            Part {
+                                bx: i * 2,
+                                by: 0,
+                                pw: 2,
+                                ph: 4,
+                            },
+                            [mv8[i], mv8[i + 2], mv16],
+                        )
                     };
                     let pmv = self.st.motion.predict(mb_x, mb_y, p.bx, p.by, p.pw, p.ph);
                     let (mv, cost) = me.search(p.bx, p.by, p.pw, p.ph, pmv, &seeds);
@@ -306,7 +330,11 @@ impl MbCoder<'_> {
         // mb_qp_delta must stay within -26..=25.
         let mut qp = prev_qp.clamp(qp_lo as i32, qp_hi as i32);
         if rng.chance(1, 3) {
-            let step = if rng.chance(1, 8) { rng.range(-26, 25) } else { rng.range(-5, 5) };
+            let step = if rng.chance(1, 8) {
+                rng.range(-26, 25)
+            } else {
+                rng.range(-5, 5)
+            };
             qp = (prev_qp + step).clamp(qp_lo as i32, qp_hi as i32);
         }
         if !(-26..=25).contains(&(qp - prev_qp)) {
@@ -327,7 +355,14 @@ impl MbCoder<'_> {
         }
 
         let roll = rng.below(100);
-        let coded = if is_p && roll < 12 && skip_ok {
+        let coded = if rng.chance(1, 40) {
+            Coded {
+                mode: MbMode::Pcm,
+                chroma_mode: 0,
+                res: Residual::default(),
+                qp,
+            }
+        } else if is_p && roll < 12 && skip_ok {
             let all_zero = Force {
                 zero_luma8: 15,
                 zero_chroma_ac: true,
@@ -380,7 +415,9 @@ impl MbCoder<'_> {
             let (has_top, has_left) = (mb_y > 0, mb_x > 0);
             let mut res = Residual::default();
             let mode = if rng.chance(1, 2) {
-                let allowed: Vec<u8> = (0..4).filter(|&m| intra::i16_mode_allowed(m, has_top, has_left)).collect();
+                let allowed: Vec<u8> = (0..4)
+                    .filter(|&m| intra::i16_mode_allowed(m, has_top, has_left))
+                    .collect();
                 let mode = allowed[rng.below(allowed.len() as u32) as usize];
                 self.encode_i16(mode, qp, force, &mut res);
                 MbMode::I16 { mode }
@@ -398,7 +435,9 @@ impl MbCoder<'_> {
                 self.encode_i4(Some(&modes), qp, force, lam, &mut res);
                 MbMode::I4 { modes }
             };
-            let allowed: Vec<u8> = (0..4).filter(|&m| intra::chroma_mode_allowed(m, has_top, has_left)).collect();
+            let allowed: Vec<u8> = (0..4)
+                .filter(|&m| intra::chroma_mode_allowed(m, has_top, has_left))
+                .collect();
             let chroma_mode = allowed[rng.below(allowed.len() as u32) as usize];
             let mut cpred = [[0u8; 64]; 2];
             self.intra_chroma_pred(chroma_mode, &mut cpred);

@@ -19,17 +19,9 @@ pub fn token_table(nc: i32) -> usize {
 
 /// Counts how often each coeff_token entry was written, so tests can show
 /// that the fuzz corpus reaches the whole table.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Coverage {
     pub coeff_token: [[[u32; 4]; 17]; 5],
-}
-
-impl Default for Coverage {
-    fn default() -> Self {
-        Coverage {
-            coeff_token: [[[0; 4]; 17]; 5],
-        }
-    }
 }
 
 impl Coverage {
@@ -287,7 +279,9 @@ pub(crate) mod tests {
 
     fn bit_string(coeffs: &[i32], nc: i32) -> String {
         let (bytes, n) = encode(coeffs, nc);
-        (0..n).map(|i| if bytes[i / 8] >> (7 - i % 8) & 1 == 1 { '1' } else { '0' }).collect()
+        (0..n)
+            .map(|i| if bytes[i / 8] >> (7 - i % 8) & 1 == 1 { '1' } else { '0' })
+            .collect()
     }
 
     // The widely reproduced worked example (block 0,3,-1,0 / 0,-1,1,0 /
@@ -319,7 +313,10 @@ pub(crate) mod tests {
     fn single_coefficient_cases() {
         // One trailing one at DC: coeff_token(1,1)="01", sign, total_zeros 0 = "1".
         assert_eq!(bit_string(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0), "0101");
-        assert_eq!(bit_string(&[-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0), "0111");
+        assert_eq!(
+            bit_string(&[-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0),
+            "0111"
+        );
         // Chroma DC with a single +1 in the last position: "1", sign 0, total_zeros 3 = "000".
         assert_eq!(bit_string(&[0, 0, 0, 1], -1), "10000");
     }

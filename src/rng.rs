@@ -27,7 +27,7 @@ impl Rng {
     /// Uniform in [0, n).
     #[inline]
     pub fn below(&mut self, n: u32) -> u32 {
-        ((self.next_u64() >> 32) * n as u64 >> 32) as u32
+        (((self.next_u64() >> 32) * n as u64) >> 32) as u32
     }
 
     /// Uniform in [lo, hi] inclusive.

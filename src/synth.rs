@@ -19,7 +19,8 @@ pub enum Pattern {
 }
 
 fn hash(x: i32, y: i32, seed: u32) -> u32 {
-    let mut h = (x as u32).wrapping_mul(0x9E3779B1) ^ (y as u32).wrapping_mul(0x85EBCA77) ^ seed.wrapping_mul(0xC2B2AE3D);
+    let mut h =
+        (x as u32).wrapping_mul(0x9E3779B1) ^ (y as u32).wrapping_mul(0x85EBCA77) ^ seed.wrapping_mul(0xC2B2AE3D);
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B3C6D);
     h ^= h >> 12;
@@ -45,10 +46,18 @@ pub fn synth_frame(width: usize, height: usize, index: usize, total: usize, patt
     let mut rng = Rng::new(seed ^ (index as u64).wrapping_mul(0x9E3779B97F4A7C15));
     let t = index as i32;
     // Scene cut: a different texture seed and motion in the second half.
-    let scene = if pattern == Pattern::Moving && total >= 4 && index >= total / 2 { 1u32 } else { 0 };
+    let scene = if pattern == Pattern::Moving && total >= 4 && index >= total / 2 {
+        1u32
+    } else {
+        0
+    };
     let s = seed as u32 ^ (scene * 7919);
     for (pi, plane) in f.planes.iter_mut().enumerate() {
-        let (pw, ph) = if pi == 0 { (width, height) } else { (width.div_ceil(2), height.div_ceil(2)) };
+        let (pw, ph) = if pi == 0 {
+            (width, height)
+        } else {
+            (width.div_ceil(2), height.div_ceil(2))
+        };
         let scale = if pi == 0 { 1 } else { 2 };
         for y in 0..ph {
             for x in 0..pw {
@@ -84,10 +93,13 @@ pub fn synth_frame(width: usize, height: usize, index: usize, total: usize, patt
                             let span_x = (width as i32 + ow).max(1);
                             let span_y = (height as i32 + oh).max(1);
                             let ox = ((k * 97 + t * (5 + 3 * k) * 64 / 16) * 4).rem_euclid(span_x * 256) - ow * 256;
-                            let oy = ((k * 53 + t * (2 * k - 1) * 64 / 16) * 4 + k * 40 * 256).rem_euclid(span_y * 256) - oh * 256;
+                            let oy = ((k * 53 + t * (2 * k - 1) * 64 / 16) * 4 + k * 40 * 256).rem_euclid(span_y * 256)
+                                - oh * 256;
                             let (rx, ry) = (lx * 256 - ox, ly * 256 - oy);
                             if rx >= 0 && ry >= 0 && rx < ow * 256 && ry < oh * 256 {
-                                val = 30.0 + 60.0 * k as f32 + 90.0 * value_noise(rx / 5, ry / 5, s + 100 + k as u32 + pi as u32);
+                                val = 30.0
+                                    + 60.0 * k as f32
+                                    + 90.0 * value_noise(rx / 5, ry / 5, s + 100 + k as u32 + pi as u32);
                             }
                         }
                         val as i32 + rng.range(-2, 2)

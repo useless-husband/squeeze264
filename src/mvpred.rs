@@ -197,7 +197,7 @@ mod tests {
         f.fill(1, 0, 0, 0, 4, 4, 0, [4, 4]); // D for MB (2,1)
         f.fill(2, 0, 0, 0, 4, 4, 0, [8, 8]); // B
         f.fill(1, 1, 0, 0, 4, 4, 0, [40, 40]); // A
-        // Last column: C is outside the picture, D replaces it.
+                                               // Last column: C is outside the picture, D replaces it.
         assert_eq!(f.predict(2, 1, 0, 0, 4, 4), [8, 8]);
     }
 

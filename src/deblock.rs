@@ -138,7 +138,11 @@ pub fn deblock_frame(frame: &mut Frame, s: &PicState, params: &DeblockParams) {
                     let (c_alpha, c_beta, c_tc_row) = thresholds((qpc_p + qpc_q + 1) >> 1, params);
                     for k in 0..4usize {
                         // 4x4 blocks on the q and p sides of this edge segment.
-                        let (qx, qy) = if dir == 0 { (mb_x * 4 + e, mb_y * 4 + k) } else { (mb_x * 4 + k, mb_y * 4 + e) };
+                        let (qx, qy) = if dir == 0 {
+                            (mb_x * 4 + e, mb_y * 4 + k)
+                        } else {
+                            (mb_x * 4 + k, mb_y * 4 + e)
+                        };
                         let q = qy * w4 + qx;
                         let p = if dir == 0 { q - 1 } else { q - w4 };
                         let bs = boundary_strength(s, p, q, mb_p, mb, mb_edge);
@@ -242,7 +246,11 @@ mod tests {
         luma_line(&mut d, 4, 1, 4, alpha, beta, 0);
         assert_eq!(d, orig);
         // Offsets shift the table index and clamp at both ends.
-        let p = DeblockParams { alpha_offset_div2: 6, beta_offset_div2: -6, chroma_qp_offset: 0 };
+        let p = DeblockParams {
+            alpha_offset_div2: 6,
+            beta_offset_div2: -6,
+            chroma_qp_offset: 0,
+        };
         let (alpha, beta, _) = thresholds(45, &p);
         assert_eq!(alpha, 255);
         assert_eq!(beta, BETA[33] as i32);

@@ -65,11 +65,18 @@ pub struct DecodeReport {
     /// Everything the decoder printed at warning level or above.
     pub stderr: String,
     pub exit_ok: bool,
+    /// The hardware decoder declined to open the stream at all (for
+    /// example VideoToolbox rejects pictures smaller than 64x64). Nothing
+    /// was decoded, so this is "not checked" rather than a mismatch.
+    pub hw_refused: bool,
 }
 
 impl DecodeReport {
     pub fn bit_exact(&self, expected_frames: usize) -> bool {
-        self.exit_ok && self.decoded_frames == expected_frames && self.mismatches.is_empty() && self.stderr.trim().is_empty()
+        self.exit_ok
+            && self.decoded_frames == expected_frames
+            && self.mismatches.is_empty()
+            && self.stderr.trim().is_empty()
     }
 }
 
@@ -93,7 +100,11 @@ pub fn check_decode(
         cmd.args(["-vf", "hwdownload,format=nv12,format=yuv420p"]);
     }
     cmd.args(["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]);
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     let mut err_pipe = child.stderr.take().unwrap();
     let err_thread = std::thread::spawn(move || {
         let mut s = String::new();
@@ -138,6 +149,9 @@ pub fn check_decode(
     drop(out);
     report.exit_ok = child.wait()?.success();
     report.stderr = err_thread.join().unwrap_or_default();
+    report.hw_refused = decoder == Decoder::VideoToolbox
+        && report.decoded_frames == 0
+        && report.stderr.contains("hwaccel initialisation returned error");
     Ok(report)
 }
 
