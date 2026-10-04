@@ -51,6 +51,13 @@ fn assert_bit_exact(name: &str, clip: &Clip, w: usize, h: usize, decoder: Decode
     let path = tmp_path(&format!("{name}.h264"));
     std::fs::write(&path, &clip.stream).unwrap();
     let report = check_decode(&ffmpeg, decoder, &path, w, h, &clip.recon[..]).unwrap();
+    if report.hw_refused && std::env::var_os("SQUEEZE264_REQUIRE_VT").is_none() {
+        // Virtual machines (CI runners) may have no usable VideoToolbox
+        // decoder. Set SQUEEZE264_REQUIRE_VT=1 to turn this into a failure.
+        eprintln!("SKIP {name}: VideoToolbox refused to open the stream on this machine");
+        std::fs::remove_file(&path).ok();
+        return;
+    }
     if !report.bit_exact(clip.frames) {
         let keep = tmp_path(&format!("{name}.failed.h264"));
         std::fs::copy(&path, &keep).ok();
@@ -318,6 +325,13 @@ fn mp4_container_decodes_identically() {
     }
     for d in decoders {
         let r = check_decode(&ffmpeg, d, &path, w, h, &recon[..]).unwrap();
+        if r.hw_refused && std::env::var_os("SQUEEZE264_REQUIRE_VT").is_none() {
+            eprintln!(
+                "SKIP mp4 with {}: decoder refused to open the stream on this machine",
+                d.name()
+            );
+            continue;
+        }
         assert!(r.bit_exact(frames), "{}: {r:?}", d.name());
     }
     // ffprobe-style sanity through ffmpeg: frame rate and frame count survive.

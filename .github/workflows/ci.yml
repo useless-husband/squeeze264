@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: install ffmpeg (the independent decoder used as conformance oracle)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --release --all-targets -- -D warnings
+      - name: python tools compile
+        run: python3 -m py_compile tools/bench.py tools/report.py tools/fetch_data.py
+      - name: build
+        run: cargo build --release
+      - name: tests (unit, encoder behaviour, CLI, bit-exact conformance on synthetic frames)
+        run: cargo test --release
+      - name: end to end on a generated clip (encode, decode with ffmpeg, compare, report)
+        run: |
+          mkdir -p out
+          ./target/release/squeeze264 gen out/ci.y4m --size 352x288 --frames 60
+          ./target/release/squeeze264 check out/ci.y4m --qp 26 --stats out/stats.json --viz-frame 20 | tee out/check.txt
+          ./target/release/squeeze264 check out/ci.y4m --bitrate 400
+          ./target/release/squeeze264 encode out/ci.y4m -o out/ci.mp4 --qp 26 --recon out/recon.y4m -q
+          python3 tools/report.py --stats out/stats.json --recon out/recon.y4m --check out/check.txt --out out/report.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: |
+            out/report.html
+            out/ci.mp4
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install ffmpeg
+        run: brew install ffmpeg
+      - name: build
+        run: cargo build --release
+      # Hosted runners are virtual machines; when VideoToolbox declines to
+      # open a stream there, the VideoToolbox tests skip with a message.
+      - name: tests (adds the VideoToolbox decoder where available)
+        run: cargo test --release
+      - name: MP4 opens in AVFoundation and decodes to identical frames
+        run: sh tools/avcheck.sh
