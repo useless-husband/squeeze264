@@ -601,3 +601,33 @@ fn oversized_macroblocks_fall_back_to_pcm() {
         assert_bit_exact("pcm-fallback-vt", &clip, 176, 144, Decoder::VideoToolbox);
     }
 }
+
+/// Things the frame comparison cannot see: what the decoder reads from the
+/// SPS of a raw Annex B stream (profile, picture size after cropping, and
+/// the VUI timing information). For raw streams ffmpeg prints the tick rate
+/// as "tbr"; H.264 counts two ticks per frame, so 29.97 fps shows as 59.94
+/// (x264's raw streams read the same way).
+#[test]
+fn annexb_stream_describes_itself_correctly() {
+    let Some(ffmpeg) = find_ffmpeg() else {
+        eprintln!("SKIP stream description: ffmpeg not found");
+        return;
+    };
+    for (num, den, expect) in [(30000, 1001, "59.94 tbr"), (25, 1, "50 tbr"), (50, 1, "100 tbr")] {
+        let cfg = Config::new(322, 242, num, den);
+        let (clip, enc) = encode(cfg, 3, Pattern::Still, 9);
+        assert_eq!(enc.params.level_idc, if num == 50 { 21 } else { 13 });
+        let path = tmp_path(&format!("describe-{num}.h264"));
+        std::fs::write(&path, &clip.stream).unwrap();
+        let probe = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-i"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let info = String::from_utf8_lossy(&probe.stderr).into_owned();
+        assert!(info.contains("h264 (Constrained Baseline)"), "{info}");
+        assert!(info.contains("322x242"), "{info}");
+        assert!(info.contains(expect), "{info}");
+        std::fs::remove_file(&path).ok();
+    }
+}

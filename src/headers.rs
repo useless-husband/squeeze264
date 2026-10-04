@@ -236,7 +236,7 @@ mod tests {
             &mut w,
             &SliceHeader {
                 idr: false,
-                frame_num: 259,
+                frame_num: 387,
                 idr_pic_id: 0,
                 qp: 31,
                 init_qp: 28,
@@ -249,7 +249,7 @@ mod tests {
         let b = w.into_bytes();
         let mut r = BitReader::new(&b);
         assert_eq!((r.ue(), r.ue(), r.ue()), (0, 5, 0));
-        assert_eq!(r.bits(8), 3); // 259 mod 256
+        assert_eq!(r.bits(8), 131); // 387 mod 256
         assert_eq!(r.bits(3), 0);
         assert_eq!(r.se(), 3);
         assert_eq!((r.ue(), r.se(), r.se()), (0, -1, 2));

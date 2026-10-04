@@ -179,3 +179,47 @@ fn level_follows_picture_size_and_rate() {
     assert_eq!(level(1280, 720, 30), 31);
     assert_eq!(level(1920, 1080, 30), 40);
 }
+
+/// Decoders tolerate a wrong frame_num (they conceal the "gap"), so the
+/// bit-exact oracle cannot see it; check the slice headers directly.
+#[test]
+fn slice_headers_carry_consecutive_frame_num_and_fresh_idr_ids() {
+    use squeeze264::bitstream::{unescape, BitReader};
+    let mut cfg = Config::new(16, 16, 30, 1);
+    cfg.keyint = 300;
+    let mut enc = Encoder::new(cfg).unwrap();
+    let mut last_idr_id = None;
+    for i in 0..620usize {
+        let out = enc.encode(&synth_frame(16, 16, i, 620, Pattern::Still, 1));
+        let rbsp = unescape(&out.nal.bytes[1..]);
+        let mut r = BitReader::new(&rbsp);
+        assert_eq!(r.ue(), 0, "first_mb_in_slice");
+        let slice_type = r.ue();
+        assert_eq!(r.ue(), 0, "pic_parameter_set_id");
+        let frame_num = r.bits(8) as usize;
+        let since_idr = i % 300;
+        assert_eq!(frame_num, since_idr % 256, "frame {i}");
+        if since_idr == 0 {
+            assert_eq!(
+                (out.nal.bytes[0] & 0x1f, slice_type),
+                (5, 7),
+                "frame {i} must be an IDR I slice"
+            );
+            let id = r.ue();
+            assert_ne!(
+                Some(id),
+                last_idr_id,
+                "consecutive IDR pictures need different idr_pic_id"
+            );
+            last_idr_id = Some(id);
+        } else {
+            assert_eq!(
+                (out.nal.bytes[0] & 0x1f, slice_type),
+                (1, 5),
+                "frame {i} must be a non-IDR P slice"
+            );
+        }
+        // Every picture is a reference picture.
+        assert_ne!(out.nal.bytes[0] >> 5, 0);
+    }
+}
