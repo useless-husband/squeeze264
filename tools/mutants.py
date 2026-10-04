@@ -71,7 +71,11 @@ MUTANTS = [
 
 
 def run_tests(workdir):
-    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(workdir, "target"))
+    # Failing conformance tests keep their streams for inspection; point the
+    # temporary directory into the work area so they are removed with it.
+    tmp = os.path.join(workdir, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(workdir, "target"), TMPDIR=tmp)
     r = subprocess.run(["cargo", "test", "--release", "--no-fail-fast", "-j", "4"], cwd=workdir, env=env,
                        capture_output=True, text=True)
     out = r.stdout + r.stderr

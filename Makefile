@@ -59,7 +59,7 @@ avcheck: build
 	sh tools/avcheck.sh
 
 demo:
-	sh ./跑跑看.command
+	bash ./跑跑看.command
 
 clean:
 	$(CARGO) clean
