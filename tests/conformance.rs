@@ -7,7 +7,7 @@
 use squeeze264::encoder::{Config, Encoder};
 use squeeze264::ratecontrol::RcMode;
 use squeeze264::synth::{synth_frame, Pattern};
-use squeeze264::verify::{check_decode, find_ffmpeg, has_videotoolbox, Decoder};
+use squeeze264::verify::{check_decode, find_ffmpeg, Decoder};
 use std::path::PathBuf;
 
 struct Clip {
@@ -116,4 +116,31 @@ fn p_frames_default_settings() {
         let (clip, _) = encode(cfg, 12, pattern, 200 + qp as u64);
         assert_bit_exact(&format!("p-qp{qp}-{pattern:?}"), &clip, 96, 80, Decoder::FfmpegSoftware);
     }
+}
+
+/// Random encoder decisions on random content: every macroblock type,
+/// partition shape, prediction mode, vector (including far outside the
+/// picture), coded_block_pattern and QP change must still decode exactly.
+#[test]
+fn fuzz_random_decisions() {
+    let mut coverage = squeeze264::cavlc::Coverage::default();
+    let sizes = [(64, 48), (16, 16), (32, 16), (16, 48), (80, 64), (128, 96), (176, 144)];
+    for seed in 0..28u64 {
+        let (w, h) = sizes[seed as usize % sizes.len()];
+        let pattern = [Pattern::Noise, Pattern::Moving, Pattern::Extremes, Pattern::Still][seed as usize % 4];
+        let (lo, hi) = [(0, 51), (0, 12), (20, 40), (40, 51), (0, 51)][seed as usize % 5];
+        let mut cfg = base(w, h);
+        cfg.fuzz = Some((seed, lo, hi));
+        cfg.keyint = [1000, 3, 7][seed as usize % 3];
+        cfg.deblock = seed % 7 != 3;
+        cfg.alpha_offset_div2 = (seed % 13) as i8 - 6;
+        cfg.beta_offset_div2 = (seed % 11) as i8 - 5;
+        cfg.chroma_qp_offset = [0, -12, 12, 3, -5][seed as usize % 5];
+        let (clip, enc) = encode(cfg, 10, pattern, 1000 + seed);
+        assert_bit_exact(&format!("fuzz-seed{seed}"), &clip, w, h, Decoder::FfmpegSoftware);
+        coverage.merge(&enc.coverage);
+    }
+    let (used, total) = coverage.summary();
+    eprintln!("fuzz corpus exercised {used}/{total} coeff_token table entries");
+    assert_eq!(used, total, "fuzz corpus should reach every coeff_token entry");
 }

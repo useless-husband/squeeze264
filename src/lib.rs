@@ -12,6 +12,7 @@ pub mod headers;
 pub mod inter;
 pub mod intra;
 pub mod mb;
+pub mod mp4;
 pub mod md5;
 pub mod me;
 pub mod mvpred;
