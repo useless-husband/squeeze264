@@ -7,7 +7,8 @@
 use squeeze264::encoder::{Config, Encoder};
 use squeeze264::ratecontrol::RcMode;
 use squeeze264::synth::{synth_frame, Pattern};
-use squeeze264::verify::{check_decode, find_ffmpeg, Decoder};
+use squeeze264::mp4::Mp4Writer;
+use squeeze264::verify::{check_decode, find_ffmpeg, has_videotoolbox, Decoder};
 use std::path::PathBuf;
 
 struct Clip {
@@ -143,4 +144,215 @@ fn fuzz_random_decisions() {
     let (used, total) = coverage.summary();
     eprintln!("fuzz corpus exercised {used}/{total} coeff_token table entries");
     assert_eq!(used, total, "fuzz corpus should reach every coeff_token entry");
+}
+
+/// Picture sizes that are not multiples of 16 are padded internally and
+/// cropped by the SPS; the decoder must output exactly the visible area.
+#[test]
+fn cropped_sizes() {
+    for (i, (w, h)) in [(50, 38), (130, 74), (2, 2), (18, 16), (16, 18), (62, 46), (354, 290)].into_iter().enumerate() {
+        let mut cfg = base(w, h);
+        cfg.rc = RcMode::ConstQp { qp: 27, i_offset: 2 };
+        let (clip, _) = encode(cfg, 6, Pattern::Moving, 300 + i as u64);
+        assert_eq!(clip.recon.len(), 6 * w * h * 3 / 2);
+        assert_bit_exact(&format!("crop-{w}x{h}"), &clip, w, h, Decoder::FfmpegSoftware);
+    }
+}
+
+/// Every encoder option on its own, on content with real motion.
+#[test]
+fn option_matrix() {
+    let variants: Vec<(&str, Box<dyn Fn(&mut Config)>)> = vec![
+        ("subpel0", Box::new(|c| c.subpel = 0)),
+        ("subpel1", Box::new(|c| c.subpel = 1)),
+        ("no-partitions", Box::new(|c| c.partitions = false)),
+        ("no-sub8x8", Box::new(|c| c.sub8x8 = false)),
+        ("no-intra-in-p", Box::new(|c| c.intra_in_p = false)),
+        ("no-deblock", Box::new(|c| c.deblock = false)),
+        ("deblock-strong", Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (6, 6))),
+        ("deblock-weak", Box::new(|c| (c.alpha_offset_div2, c.beta_offset_div2) = (-6, -6))),
+        ("chroma-qp+6", Box::new(|c| c.chroma_qp_offset = 6)),
+        ("chroma-qp-12", Box::new(|c| c.chroma_qp_offset = -12)),
+        ("no-decimate", Box::new(|c| c.decimate = false)),
+        ("range4", Box::new(|c| c.me_range = 4)),
+        ("range48", Box::new(|c| c.me_range = 48)),
+        ("keyint5", Box::new(|c| c.keyint = 5)),
+        ("fps-ntsc", Box::new(|c| (c.fps_num, c.fps_den) = (30000, 1001))),
+    ];
+    for (name, tweak) in variants {
+        for qp in [23u8, 34] {
+            let mut cfg = base(112, 96);
+            cfg.rc = RcMode::ConstQp { qp, i_offset: 3 };
+            tweak(&mut cfg);
+            let (clip, _) = encode(cfg, 9, Pattern::Moving, 400);
+            assert_bit_exact(&format!("opt-{name}-qp{qp}"), &clip, 112, 96, Decoder::FfmpegSoftware);
+        }
+    }
+}
+
+/// Target-bitrate mode changes QP from frame to frame; streams must stay
+/// decodable and the average rate must land near the target.
+#[test]
+fn bitrate_mode() {
+    for kbps in [150.0, 600.0] {
+        let mut cfg = base(176, 144);
+        cfg.rc = RcMode::Abr { bps: kbps * 1000.0 };
+        cfg.keyint = 30;
+        let frames = 90;
+        let (clip, _) = encode(cfg, frames, Pattern::Moving, 500);
+        assert_bit_exact(&format!("abr-{kbps}"), &clip, 176, 144, Decoder::FfmpegSoftware);
+        let achieved = clip.stream.len() as f64 * 8.0 * 30.0 / frames as f64 / 1000.0;
+        eprintln!("ABR target {kbps} kbit/s, achieved {achieved:.1} kbit/s");
+        assert!((achieved / kbps - 1.0).abs() < 0.2, "target {kbps}, achieved {achieved:.1}");
+    }
+}
+
+/// frame_num is 8 bits wide; a long run without IDR pictures must wrap cleanly.
+#[test]
+fn frame_num_wraps_without_idr() {
+    let mut cfg = base(32, 32);
+    cfg.keyint = 10_000;
+    let (clip, _) = encode(cfg, 530, Pattern::Moving, 600);
+    assert_bit_exact("frame-num-wrap", &clip, 32, 32, Decoder::FfmpegSoftware);
+}
+
+/// From level 3.1 up at most 16 motion vectors per two macroblocks are
+/// allowed, so sub-8x8 partitions must not be used at 720p.
+#[test]
+fn large_pictures_respect_the_motion_vector_count_limit() {
+    let cfg = base(1280, 720);
+    let mut enc = Encoder::new(cfg).unwrap();
+    assert_eq!(enc.params.level_idc, 31);
+    let mut subs = [0u32; 4];
+    for i in 0..3 {
+        let src = synth_frame(1280, 720, i, 3, Pattern::Moving, 700);
+        let out = enc.encode(&src);
+        for k in 0..4 {
+            subs[k] += out.stats.subs[k];
+        }
+    }
+    assert!(subs[0] > 0, "8x8 partitions should be in use");
+    assert_eq!(&subs[1..], &[0, 0, 0]);
+}
+
+/// The second, independent decoder: Apple's VideoToolbox (hardware where
+/// available), driven through ffmpeg's hwaccel with the surface format
+/// forced so that a software fallback cannot go unnoticed.
+#[test]
+fn videotoolbox_matches() {
+    let Some(ffmpeg) = find_ffmpeg() else {
+        eprintln!("SKIP videotoolbox: ffmpeg not found");
+        return;
+    };
+    if !has_videotoolbox(&ffmpeg) {
+        eprintln!("SKIP videotoolbox: this ffmpeg build has no VideoToolbox hwaccel (not macOS?)");
+        return;
+    }
+    for (name, w, h, qp, pattern) in [
+        ("vt-cif", 352, 288, 26u8, Pattern::Moving),
+        ("vt-small", 176, 144, 35, Pattern::Moving),
+        ("vt-crop", 322, 242, 22, Pattern::Extremes),
+        ("vt-noise", 192, 128, 30, Pattern::Noise),
+    ] {
+        let mut cfg = base(w, h);
+        cfg.rc = RcMode::ConstQp { qp, i_offset: 3 };
+        let (clip, _) = encode(cfg, 10, pattern, 800);
+        assert_bit_exact(name, &clip, w, h, Decoder::VideoToolbox);
+    }
+    // Random decisions through the hardware decoder as well.
+    for seed in 0..6u64 {
+        let mut cfg = base(320, 240);
+        cfg.fuzz = Some((seed, 0, 51));
+        cfg.keyint = 4;
+        let (clip, _) = encode(cfg, 8, Pattern::Moving, 900 + seed);
+        assert_bit_exact(&format!("vt-fuzz{seed}"), &clip, 320, 240, Decoder::VideoToolbox);
+    }
+}
+
+/// The MP4 file must decode to the same frames as the raw stream.
+#[test]
+fn mp4_container_decodes_identically() {
+    let Some(ffmpeg) = find_ffmpeg() else {
+        eprintln!("SKIP mp4: ffmpeg not found");
+        return;
+    };
+    let (w, h, frames) = (176, 144, 20);
+    let mut cfg = Config::new(w, h, 30000, 1001);
+    cfg.keyint = 8;
+    let mut enc = Encoder::new(cfg).unwrap();
+    let (sps, pps) = enc.headers();
+    let path = tmp_path("container.mp4");
+    let file = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+    let mut mp4 = Mp4Writer::new(file, &sps, &pps, w, h, 30000, 1001).unwrap();
+    let mut recon = Vec::new();
+    for i in 0..frames {
+        let out = enc.encode(&synth_frame(w, h, i, frames, Pattern::Moving, 42));
+        mp4.write_sample(&out.nal, out.stats.idr).unwrap();
+        enc.recon().write_i420(w, h, &mut recon);
+    }
+    mp4.finish().unwrap();
+    let mut decoders = vec![Decoder::FfmpegSoftware];
+    if has_videotoolbox(&ffmpeg) {
+        decoders.push(Decoder::VideoToolbox);
+    }
+    for d in decoders {
+        let r = check_decode(&ffmpeg, d, &path, w, h, &recon[..]).unwrap();
+        assert!(r.bit_exact(frames), "{}: {r:?}", d.name());
+    }
+    // ffprobe-style sanity through ffmpeg: frame rate and frame count survive.
+    let probe = std::process::Command::new(&ffmpeg).args(["-hide_banner", "-i"]).arg(&path).output().unwrap();
+    let info = String::from_utf8_lossy(&probe.stderr).into_owned();
+    assert!(info.contains("Constrained Baseline"), "{info}");
+    assert!(info.contains("176x144"), "{info}");
+    assert!(info.contains("29.97 fps"), "{info}");
+    std::fs::remove_file(&path).ok();
+}
+
+/// Real footage from the Xiph collection, when `make data` has been run.
+#[test]
+fn real_clips() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+    let Some(ffmpeg) = find_ffmpeg() else {
+        eprintln!("SKIP real clips: ffmpeg not found");
+        return;
+    };
+    let mut ran = 0;
+    for (name, frames) in [("foreman_cif.y4m", 60), ("akiyo_cif.y4m", 40), ("mobile_cif.y4m", 40), ("shields_720p_100f.y4m", 12)] {
+        let path = dir.join(name);
+        let Ok(file) = std::fs::File::open(&path) else {
+            eprintln!("SKIP {name}: not in data/ (run `make data` to download the test clips)");
+            continue;
+        };
+        let mut reader = squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(file)).unwrap();
+        let hdr = reader.header;
+        for qp in [22u8, 37] {
+            let mut cfg = Config::new(hdr.width, hdr.height, hdr.fps_num, hdr.fps_den);
+            cfg.rc = RcMode::ConstQp { qp, i_offset: 3 };
+            let mut enc = Encoder::new(cfg).unwrap();
+            let (sps, pps) = enc.headers();
+            let mut src = enc.new_input_frame();
+            let (mut stream, mut recon) = (Vec::new(), Vec::new());
+            let mut reader2 = squeeze264::y4m::Y4mReader::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap())).unwrap();
+            let mut n = 0;
+            while n < frames && reader2.read_frame(&mut src).unwrap() {
+                let out = enc.encode(&src);
+                if out.stats.idr {
+                    sps.write_annexb(&mut stream);
+                    pps.write_annexb(&mut stream);
+                }
+                out.nal.write_annexb(&mut stream);
+                enc.recon().write_i420(hdr.width, hdr.height, &mut recon);
+                n += 1;
+            }
+            let clip = Clip { stream, recon, frames: n };
+            let tag = format!("{}-qp{qp}", name.trim_end_matches(".y4m"));
+            assert_bit_exact(&tag, &clip, hdr.width, hdr.height, Decoder::FfmpegSoftware);
+            if has_videotoolbox(&ffmpeg) {
+                assert_bit_exact(&format!("{tag}-vt"), &clip, hdr.width, hdr.height, Decoder::VideoToolbox);
+            }
+        }
+        let _ = reader.read_frame(&mut Encoder::new(Config::new(hdr.width, hdr.height, 1, 1)).unwrap().new_input_frame());
+        ran += 1;
+    }
+    eprintln!("real clips checked: {ran}");
 }
