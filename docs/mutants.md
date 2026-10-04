@@ -7,27 +7,27 @@ and VideoToolbox).
 
 | # | File | Planted bug | Result | Unit | Integration |
 |---|---|---|---|---|---|
-| 1 | `src/tables.rs` | coeff_token table (nC 0-1): two code words of TotalCoeff 4 exchange their last bits | caught | 2 | 0 |
-| 2 | `src/tables.rs` | coded_block_pattern mapping: two inter entries swapped | caught | 0 | 2 |
+| 1 | `src/tables.rs` | coeff_token table (nC 0-1): two code words of TotalCoeff 4 exchange their last bits | caught | 2 | 11 |
+| 2 | `src/tables.rs` | coded_block_pattern mapping: two inter entries swapped | caught | 0 | 11 |
 | 3 | `src/tables.rs` | deblocking tC0 table: last entry off by one | caught | 0 | 3 |
-| 4 | `src/tables.rs` | total_zeros table (TotalCoeff 12): two code words swapped | caught | 0 | 2 |
-| 5 | `src/transform.rs` | inverse transform: rounding constant 31 instead of 32 (first row) | caught | 2 | 0 |
-| 6 | `src/transform.rs` | Intra16x16 DC scaling: wrong rounding term (only visible below QP 12) | caught | 1 | 0 |
-| 7 | `src/inter.rs` | luma half-sample filter: rounding 15 instead of 16 | caught | 2 | 0 |
-| 8 | `src/inter.rs` | chroma interpolation: rounding 31 instead of 32 | caught | 1 | 0 |
-| 9 | `src/deblock.rs` | deblocking bS 4: strong-filter condition uses <= instead of < | caught | 2 | 0 |
-| 10 | `src/deblock.rs` | deblocking bS 1: horizontal vector difference threshold off by one | caught | 1 | 0 |
-| 11 | `src/mvpred.rs` | motion vector prediction: single-matching-neighbour rule disabled | caught | 4 | 0 |
-| 12 | `src/mvpred.rs` | motion vector prediction: above-right availability by raster instead of decoding order | caught | 1 | 0 |
-| 13 | `src/cavlc.rs` | CAVLC: initial suffixLength rule uses TotalCoeff > 9 | caught | 1 | 0 |
-| 14 | `src/intra.rs` | chroma plane prediction: gradient factor 33 instead of 34 | caught | 0 | 2 |
-| 15 | `src/intra.rs` | Intra4x4 diagonal-down-left: corner sample rounding | caught | 1 | 0 |
-| 16 | `src/mb.rs` | Intra4x4 mode prediction: max instead of min of the neighbours | caught | 0 | 2 |
-| 17 | `src/mb.rs` | CAVLC context nC: average of neighbours rounded down | caught | 0 | 2 |
+| 4 | `src/tables.rs` | total_zeros table (TotalCoeff 12): two code words swapped | caught | 0 | 12 |
+| 5 | `src/transform.rs` | inverse transform: rounding constant 31 instead of 32 (first row) | caught | 2 | 12 |
+| 6 | `src/transform.rs` | Intra16x16 DC scaling: wrong rounding term (only visible below QP 12) | caught | 1 | 4 |
+| 7 | `src/inter.rs` | luma half-sample filter: rounding 15 instead of 16 | caught | 2 | 11 |
+| 8 | `src/inter.rs` | chroma interpolation: rounding 31 instead of 32 | caught | 1 | 11 |
+| 9 | `src/deblock.rs` | deblocking bS 4: strong-filter condition uses <= instead of < | caught | 2 | 12 |
+| 10 | `src/deblock.rs` | deblocking bS 1: horizontal vector difference threshold off by one | caught | 1 | 11 |
+| 11 | `src/mvpred.rs` | motion vector prediction: single-matching-neighbour rule disabled | caught | 4 | 11 |
+| 12 | `src/mvpred.rs` | motion vector prediction: above-right availability by raster instead of decoding order | caught | 1 | 11 |
+| 13 | `src/cavlc.rs` | CAVLC: initial suffixLength rule uses TotalCoeff > 9 | caught | 1 | 12 |
+| 14 | `src/intra.rs` | chroma plane prediction: gradient factor 33 instead of 34 | caught | 0 | 12 |
+| 15 | `src/intra.rs` | Intra4x4 diagonal-down-left: corner sample rounding | caught | 1 | 12 |
+| 16 | `src/mb.rs` | Intra4x4 mode prediction: max instead of min of the neighbours | caught | 0 | 12 |
+| 17 | `src/mb.rs` | CAVLC context nC: average of neighbours rounded down | caught | 0 | 12 |
 | 18 | `src/mb.rs` | I_PCM macroblocks deblocked with the running QP instead of QP 0 | caught | 0 | 2 |
-| 19 | `src/mb.rs` | Intra4x4: above-right samples treated as available whenever inside the macroblock | caught | 0 | 2 |
+| 19 | `src/mb.rs` | Intra4x4: above-right samples treated as available whenever inside the macroblock | caught | 0 | 11 |
 | 20 | `src/encoder.rs` | slice data: a single trailing skipped macroblock loses its mb_skip_run | caught | 0 | 8 |
-| 21 | `src/headers.rs` | slice header: frame_num wraps at 128 instead of 256 | SURVIVED | 0 | 0 |
-| 22 | `src/bitstream.rs` | NAL escaping: 00 00 03 in the payload is not escaped | caught | 2 | 0 |
+| 21 | `src/headers.rs` | slice header: frame_num wraps at 128 instead of 256 | caught | 1 | 1 |
+| 22 | `src/bitstream.rs` | NAL escaping: 00 00 03 in the payload is not escaped | caught | 2 | 5 |
 
-21 of 22 mutants caught.
+22 of 22 mutants caught.
