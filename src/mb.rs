@@ -260,9 +260,14 @@ impl MbCoder<'_> {
         let (x0, y0) = (mb_x as i32 * 16, mb_y as i32 * 16);
         // The 16x16 block may reach MV_BORDER samples outside the picture;
         // partitions inside the macroblock then stay inside that area too.
-        self.mv_min = [(-MV_BORDER - x0) * 4, ((-MV_BORDER - y0) * 4).max(-self.max_vmv_q)];
+        // Horizontal components are limited to [-2048, 2047.75] samples by
+        // Annex A, vertical ones by the level.
+        self.mv_min = [
+            ((-MV_BORDER - x0) * 4).max(-8192),
+            ((-MV_BORDER - y0) * 4).max(-self.max_vmv_q),
+        ];
         self.mv_max = [
-            (w + MV_BORDER - 16 - x0) * 4,
+            ((w + MV_BORDER - 16 - x0) * 4).min(8191),
             ((h + MV_BORDER - 16 - y0) * 4).min(self.max_vmv_q - 1),
         ];
     }

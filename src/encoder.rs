@@ -168,7 +168,7 @@ impl Encoder {
             level_idc: level.idc,
             init_qp,
             chroma_qp_offset: cfg.chroma_qp_offset,
-            max_mv_x: ((mb_w as i32 * 16 + MV_BORDER) * 4) as u32,
+            max_mv_x: ((mb_w as i32 * 16 + MV_BORDER) * 4).min(8191) as u32,
             max_mv_y: (((mb_h as i32 * 16 + MV_BORDER) * 4).min(max_vmv_q)) as u32,
         };
         let rc = RateControl::new(cfg.rc, fps, cfg.keyint, cfg.width, cfg.height);
