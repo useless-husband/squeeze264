@@ -1,7 +1,8 @@
 # squeeze264
 
 用 Rust 從零寫的 H.264（AVC）影片編碼器。完全照 ITU-T H.264 規格書的文字實作，沒有用任何第三方套件。
-輸入是未壓縮的 Y4M 影片，輸出是 QuickTime Player、VLC 和其他播放器都能直接打開的 `.mp4`。
+輸入是未壓縮的 Y4M 影片，輸出是 `.mp4`：QuickTime Player 可以直接播放（用它背後的 AVFoundation 框架驗證過），
+VLC、ffplay 這類以 libavcodec 為基礎的播放器也可以（用 ffmpeg 驗證過）。
 
 這個專案的重點不只是編碼器本身，而是**證明它是對的**：每一段測試影片壓完之後，交給兩個獨立的解碼器
 （ffmpeg 的 libavcodec 和 Apple 的 VideoToolbox）解碼，解出來的每一張畫面都必須和編碼器自己算出來的重建畫面

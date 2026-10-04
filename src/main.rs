@@ -584,7 +584,7 @@ fn cmd_check(o: &mut Options) -> Result<(), String> {
             let r = check_decode(&ffmpeg, decoder, path, s.width, s.height, expected).map_err(|e| e.to_string())?;
             if r.hw_refused {
                 println!(
-                    "SKIP  {:42} {:8} the hardware decoder refused to open a {}x{} stream (it needs at least 64x64)",
+                    "SKIP  {:42} {:8} the hardware decoder produced no frames for this {}x{} stream (it needs at least 64x64 and real hardware)",
                     decoder.name(),
                     container,
                     s.width,

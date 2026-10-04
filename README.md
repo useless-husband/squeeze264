@@ -1,8 +1,9 @@
 # squeeze264
 
 An H.264 (AVC) video encoder written from scratch in Rust, from the text of the ITU-T H.264 specification,
-with no third-party crates. It takes raw Y4M video and writes `.mp4` files that open in QuickTime Player, VLC
-and anything else that plays H.264.
+with no third-party crates. It takes raw Y4M video and writes `.mp4` files that play in QuickTime Player
+(checked through AVFoundation, the framework behind it) and in players built on libavcodec such as VLC and
+ffplay (checked through ffmpeg).
 
 The point of the project is not the encoder alone but the proof that it is correct: for every test stream, two
 independent decoders (ffmpeg's libavcodec and Apple's VideoToolbox) must output frames that are **byte-identical**

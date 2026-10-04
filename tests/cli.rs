@@ -13,6 +13,14 @@ fn tmp(name: &str) -> PathBuf {
     dir.join(name)
 }
 
+/// Removes the files a test created (kept when the test fails, for debugging).
+fn cleanup(names: &[&str]) {
+    for n in names {
+        std::fs::remove_file(tmp(n)).ok();
+    }
+    std::fs::remove_dir(tmp("x").parent().unwrap()).ok();
+}
+
 fn gen(name: &str, size: &str, frames: u32) -> PathBuf {
     let path = tmp(name);
     let out = bin()
@@ -78,6 +86,7 @@ fn encode_writes_all_requested_outputs() {
     for (open, close) in [('{', '}'), ('[', ']')] {
         assert_eq!(json.matches(open).count(), json.matches(close).count());
     }
+    cleanup(&["a.y4m", "a.h264", "a.mp4", "a-recon.y4m", "a.md5", "a.json"]);
 }
 
 /// The per-frame MD5 list must equal what `ffmpeg -f framemd5` computes
@@ -128,6 +137,7 @@ fn framemd5_matches_ffmpeg() {
         .collect();
     assert_eq!(ours.len(), 15);
     assert_eq!(ours, theirs);
+    cleanup(&["b.y4m", "b.h264", "b.md5"]);
 }
 
 #[test]
@@ -143,6 +153,7 @@ fn check_command_reports_bit_exactness() {
     assert!(text.contains("PASS  ffmpeg"), "{text}");
     assert!(!text.contains("FAIL"), "{text}");
     assert!(text.contains("bit-exact"), "{text}");
+    cleanup(&["c.y4m"]);
 }
 
 #[test]
@@ -200,6 +211,7 @@ fn errors_are_reported_with_exit_status_1() {
     let out = bin().arg("--help").output().unwrap();
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).contains("USAGE"));
+    cleanup(&["junk.y4m", "odd.y4m", "x.h264", "j.h264", "o.h264"]);
 }
 
 #[test]
@@ -216,4 +228,5 @@ fn truncated_input_is_reported() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("d-cut.y4m"));
+    cleanup(&["d.y4m", "d-cut.y4m", "d.h264"]);
 }

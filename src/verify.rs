@@ -65,9 +65,10 @@ pub struct DecodeReport {
     /// Everything the decoder printed at warning level or above.
     pub stderr: String,
     pub exit_ok: bool,
-    /// The hardware decoder declined to open the stream at all (for
-    /// example VideoToolbox rejects pictures smaller than 64x64). Nothing
-    /// was decoded, so this is "not checked" rather than a mismatch.
+    /// The hardware decoder produced no frame at all: it declined to open
+    /// the stream (VideoToolbox rejects pictures smaller than 64x64) or is
+    /// not usable on this machine (virtual machines). Nothing was decoded,
+    /// so this is "not checked" rather than a mismatch.
     pub hw_refused: bool,
 }
 
@@ -116,42 +117,51 @@ pub fn check_decode(
     let mut got = vec![0u8; frame_bytes];
     let mut want = vec![0u8; frame_bytes];
     let mut report = DecodeReport::default();
-    loop {
-        match read_full(&mut out, &mut got)? {
-            0 => break,
-            n if n < frame_bytes => {
-                report.mismatches.push(report.decoded_frames);
-                break;
+    let mut compare = || -> io::Result<()> {
+        loop {
+            match read_full(&mut out, &mut got)? {
+                0 => break,
+                n if n < frame_bytes => {
+                    report.mismatches.push(report.decoded_frames);
+                    break;
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        let idx = report.decoded_frames;
-        report.decoded_frames += 1;
-        if read_full(&mut expected, &mut want)? < frame_bytes {
-            report.mismatches.push(idx);
-            continue;
-        }
-        if got != want {
-            report.mismatches.push(idx);
-            if report.first_diff.is_none() {
-                let pos = got.iter().zip(&want).position(|(a, b)| a != b).unwrap();
-                let (plane, off, pw) = if pos < width * height {
-                    (0, pos, width)
-                } else if pos < width * height * 5 / 4 {
-                    (1, pos - width * height, width / 2)
-                } else {
-                    (2, pos - width * height * 5 / 4, width / 2)
-                };
-                report.first_diff = Some((idx, plane, off % pw, off / pw, want[pos], got[pos]));
+            let idx = report.decoded_frames;
+            report.decoded_frames += 1;
+            if read_full(&mut expected, &mut want)? < frame_bytes {
+                report.mismatches.push(idx);
+                continue;
+            }
+            if got != want {
+                report.mismatches.push(idx);
+                if report.first_diff.is_none() {
+                    let pos = got.iter().zip(&want).position(|(a, b)| a != b).unwrap();
+                    let (plane, off, pw) = if pos < width * height {
+                        (0, pos, width)
+                    } else if pos < width * height * 5 / 4 {
+                        (1, pos - width * height, width / 2)
+                    } else {
+                        (2, pos - width * height * 5 / 4, width / 2)
+                    };
+                    report.first_diff = Some((idx, plane, off % pw, off / pw, want[pos], got[pos]));
+                }
             }
         }
+        Ok(())
+    };
+    if let Err(e) = compare() {
+        // Do not leave the decoder process behind when reading fails.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
     }
     drop(out);
     report.exit_ok = child.wait()?.success();
     report.stderr = err_thread.join().unwrap_or_default();
     report.hw_refused = decoder == Decoder::VideoToolbox
         && report.decoded_frames == 0
-        && report.stderr.contains("hwaccel initialisation returned error");
+        && (!report.exit_ok || report.stderr.contains("hwaccel initialisation returned error"));
     Ok(report)
 }
 

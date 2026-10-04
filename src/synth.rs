@@ -80,21 +80,23 @@ pub fn synth_frame(width: usize, height: usize, index: usize, total: usize, patt
                     }
                     Pattern::Moving => {
                         // Background pans by a fractional amount each frame.
-                        let (vx, vy) = if scene == 0 { (150, 60) } else { (-90, 200) };
+                        let (vx, vy) = if scene == 0 { (420, 150) } else { (-300, 500) };
                         let bx = lx * 256 + t * vx;
                         let by = ly * 256 + t * vy;
                         let mut val = 40.0
                             + 110.0 * value_noise(bx / 14, by / 14, s + pi as u32)
                             + 50.0 * value_noise(bx / 3, by / 3, s + 17 + pi as u32);
-                        // Three rectangles with their own textures and velocities.
+                        // Three rectangles with their own textures, moving at
+                        // 3 to 7.5 samples per frame and wrapping around.
                         for k in 0..3i32 {
                             let ow = (width as i32 / 5).max(8);
                             let oh = (height as i32 / 5).max(8);
                             let span_x = (width as i32 + ow).max(1);
                             let span_y = (height as i32 + oh).max(1);
-                            let ox = ((k * 97 + t * (5 + 3 * k) * 64 / 16) * 4).rem_euclid(span_x * 256) - ow * 256;
-                            let oy = ((k * 53 + t * (2 * k - 1) * 64 / 16) * 4 + k * 40 * 256).rem_euclid(span_y * 256)
-                                - oh * 256;
+                            let start_x = (k * width as i32 / 3 + ow + 10) * 256;
+                            let start_y = (k * height as i32 / 4 + oh + 5) * 256;
+                            let ox = (start_x + t * (768 + 576 * k)).rem_euclid(span_x * 256) - ow * 256;
+                            let oy = (start_y + t * (k - 1) * 384).rem_euclid(span_y * 256) - oh * 256;
                             let (rx, ry) = (lx * 256 - ox, ly * 256 - oy);
                             if rx >= 0 && ry >= 0 && rx < ow * 256 && ry < oh * 256 {
                                 val = 30.0
