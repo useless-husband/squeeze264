@@ -158,11 +158,25 @@ pub fn check_decode(
     }
     drop(out);
     report.exit_ok = child.wait()?.success();
-    report.stderr = err_thread.join().unwrap_or_default();
+    report.stderr = drop_platform_noise(&err_thread.join().unwrap_or_default());
     report.hw_refused = decoder == Decoder::VideoToolbox
         && report.decoded_frames == 0
         && (!report.exit_ok || report.stderr.contains("hwaccel initialisation returned error"));
     Ok(report)
+}
+
+/// Removes lines that come from the operating system rather than from the
+/// decoder. On virtual machines (GitHub's macOS runners) IOKit prints
+/// "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver" to stderr when
+/// the hardware download path looks for a scaler driver the VM does not
+/// have; the frames are still decoded and compared. Only that exact notice
+/// is dropped, so every real decoder warning still fails the check.
+fn drop_platform_noise(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("IOServiceMatchingfailed for:"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
@@ -176,4 +190,18 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
         }
     }
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drop_platform_noise;
+
+    #[test]
+    fn only_the_vm_driver_notice_is_dropped() {
+        let vm = "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver\n";
+        assert_eq!(drop_platform_noise(vm), "");
+        let real = "[h264 @ 0x1] error while decoding MB 3 4, bytestream -5";
+        assert_eq!(drop_platform_noise(real), real);
+        assert_eq!(drop_platform_noise(&format!("{vm}{real}\n")), real);
+    }
 }
