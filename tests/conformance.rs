@@ -64,7 +64,7 @@ fn assert_bit_exact(name: &str, clip: &Clip, w: usize, h: usize, decoder: Decode
     if report.hw_refused && std::env::var_os("SQUEEZE264_REQUIRE_VT").is_none() {
         // Virtual machines (CI runners) may have no usable VideoToolbox
         // decoder. Set SQUEEZE264_REQUIRE_VT=1 to turn this into a failure.
-        eprintln!("SKIP {name}: VideoToolbox produced no frames on this machine");
+        eprintln!("SKIP {name}: VideoToolbox cannot be checked on this machine (virtual machine or refused stream)");
         std::fs::remove_file(&path).ok();
         return;
     }

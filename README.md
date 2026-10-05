@@ -209,7 +209,10 @@ akiyo at 100: 104; mobile at 1500: 1525; shields 720p at 4000: 4276 over only 10
 - Input must be 8-bit 4:2:0 Y4M with even dimensions. The sample aspect ratio of the input is ignored
   (square pixels assumed), as are colour primaries.
 - VideoToolbox refused pictures smaller than 64x64 here (32x32 and 64x48 were rejected), so for those only the ffmpeg software decoder is checked
-  (`check` prints SKIP). The hardware comparison needs macOS; on Linux only ffmpeg is used.
+  (`check` prints SKIP). The hardware comparison needs macOS on real hardware; on Linux only ffmpeg is used.
+- On virtual machines, including GitHub's macOS runners, the VideoToolbox comparison is skipped: frames come back
+  through a paravirtual surface path and differed in chroma from real hardware for the same stream. CI therefore
+  proves bit-exactness against ffmpeg only; the VideoToolbox results above are from a physical Apple M5.
 - The MP4 muxer writes exactly one video track with constant frame duration and puts the index at the end of the
   file (fine for local playback, not for progressive download).
 - Conformance was established with decoders, not with the official JVT conformance bitstreams (those test

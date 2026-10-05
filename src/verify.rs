@@ -65,10 +65,11 @@ pub struct DecodeReport {
     /// Everything the decoder printed at warning level or above.
     pub stderr: String,
     pub exit_ok: bool,
-    /// The hardware decoder produced no frame at all: it declined to open
-    /// the stream (VideoToolbox rejects pictures smaller than 64x64) or is
-    /// not usable on this machine (virtual machines). Nothing was decoded,
-    /// so this is "not checked" rather than a mismatch.
+    /// The hardware decoder could not be checked: it produced no frame at
+    /// all (VideoToolbox rejects pictures smaller than 64x64), or this is a
+    /// virtual machine, where frames come back through a paravirtual
+    /// surface path that alters chroma samples. This is "not checked"
+    /// rather than a mismatch.
     pub hw_refused: bool,
 }
 
@@ -158,25 +159,23 @@ pub fn check_decode(
     }
     drop(out);
     report.exit_ok = child.wait()?.success();
-    report.stderr = drop_platform_noise(&err_thread.join().unwrap_or_default());
+    report.stderr = err_thread.join().unwrap_or_default();
     report.hw_refused = decoder == Decoder::VideoToolbox
-        && report.decoded_frames == 0
-        && (!report.exit_ok || report.stderr.contains("hwaccel initialisation returned error"));
+        && (is_paravirtual(&report.stderr)
+            || (report.decoded_frames == 0
+                && (!report.exit_ok || report.stderr.contains("hwaccel initialisation returned error"))));
     Ok(report)
 }
 
-/// Removes lines that come from the operating system rather than from the
-/// decoder. On virtual machines (GitHub's macOS runners) IOKit prints
-/// "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver" to stderr when
-/// the hardware download path looks for a scaler driver the VM does not
-/// have; the frames are still decoded and compared. Only that exact notice
-/// is dropped, so every real decoder warning still fails the check.
-fn drop_platform_noise(stderr: &str) -> String {
+/// True when the hardware download ran on a virtual machine. GitHub's
+/// macOS runners print "IOServiceMatchingfailed for:
+/// AppleM2ScalerParavirtDriver" from IOKit; the frames that come back on
+/// that path were seen to differ from real hardware in chroma for the same
+/// stream, so they say nothing about the encoder.
+fn is_paravirtual(stderr: &str) -> bool {
     stderr
         .lines()
-        .filter(|l| !l.trim_start().starts_with("IOServiceMatchingfailed for:"))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .any(|l| l.contains("IOServiceMatchingfailed for:") && l.contains("Paravirt"))
 }
 
 fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
@@ -194,14 +193,16 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::drop_platform_noise;
+    use super::is_paravirtual;
 
     #[test]
-    fn only_the_vm_driver_notice_is_dropped() {
-        let vm = "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver\n";
-        assert_eq!(drop_platform_noise(vm), "");
-        let real = "[h264 @ 0x1] error while decoding MB 3 4, bytestream -5";
-        assert_eq!(drop_platform_noise(real), real);
-        assert_eq!(drop_platform_noise(&format!("{vm}{real}\n")), real);
+    fn only_the_vm_driver_notice_marks_a_virtual_machine() {
+        assert!(is_paravirtual(
+            "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver\n"
+        ));
+        assert!(!is_paravirtual(
+            "[h264 @ 0x1] error while decoding MB 3 4, bytestream -5"
+        ));
+        assert!(!is_paravirtual(""));
     }
 }
